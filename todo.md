@@ -1,0 +1,13 @@
+- [x] Custom branding icon generation and app.config.ts update
+- [x] Backend tRPC routes: audio upload endpoint, Whisper STT integration, AI text formatting/polishing, and vocabulary prompt injection
+- [x] Mobile Audio Recording Engine: microphone permissions, cross-platform audio capture (expo-audio & web fallback), live decibel meter, and rolling chunk manager for >30m sessions
+- [x] Waveform visualizer component with responsive animated bars and recording timer
+- [x] Long-Session (>30m) manager: chunking, auto-save to AsyncStorage, sleep prevention with expo-keep-awake, and seamless audio stitching
+- [x] AI Formatting Styles Engine: Clean Voice, Raw Verbatim, Executive Summary, Bullet Points, Email Draft, Meeting Minutes
+- [x] Main Dictation Screen: live recording controls, style selector, interactive transcript preview, quick copy, and export
+- [x] History Screen: searchable session list, filter by >30m sessions, duration badges, audio playback preview, and item deletion
+- [x] Session Detail Screen: full transcript reader & editor, audio playback with speed controls, and AI re-formatting modal
+- [x] Custom Dictionary Screen: add custom vocabulary, names, acronyms, and industry presets
+- [x] Settings Screen: 30m+ session configuration, chunk duration, wake-lock toggle, filler word removal, default style, and language selection
+- [x] End-to-end verification and visual testing with webdev_take_screenshot
+- [x] Final checkpoint and delivery
