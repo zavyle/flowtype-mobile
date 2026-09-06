@@ -80,15 +80,34 @@ export const DEFAULT_VOCABULARY: CustomVocabularyItem[] = [
   { id: "8", term: "Whisper STT", category: "tech", notes: "OpenAI speech model" },
 ];
 
+const DEMO_TRANSCRIPT_MARKERS = [
+  "Welcome to FlowType. This is an extended dictation session",
+  "seamless voice capture exceeding 30 minutes with instant AI formatting",
+];
+
+function isDemoSession(session: TranscriptionSession): boolean {
+  const searchableText = `${session.title} ${session.rawText} ${session.formattedText}`;
+  return DEMO_TRANSCRIPT_MARKERS.some((marker) => searchableText.includes(marker));
+}
+
 export async function getSessions(): Promise<TranscriptionSession[]> {
   try {
     const raw = await AsyncStorage.getItem(SESSIONS_KEY);
-    if (!raw) return getSampleSessions();
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+
+    const realSessions = parsed.filter(
+      (session): session is TranscriptionSession => session && typeof session === "object" && !isDemoSession(session),
+    );
+
+    if (realSessions.length !== parsed.length) {
+      await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(realSessions));
+    }
+    return realSessions;
   } catch (error) {
     console.error("Failed to read sessions:", error);
-    return getSampleSessions();
+    return [];
   }
 }
 

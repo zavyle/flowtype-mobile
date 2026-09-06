@@ -1,41 +1,77 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Platform, Alert } from "react-native";
 import * as Haptics from "expo-haptics";
-import { AudioChunk } from "@/lib/sessionStore";
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from "expo-audio";
+import * as FileSystem from "expo-file-system/legacy";
 
 export interface AudioEngineState {
   isRecording: boolean;
   isPaused: boolean;
   durationSeconds: number;
-  audioLevel: number; // 0 to 1
-  chunks: AudioChunk[];
+  audioLevel: number;
   currentChunkIndex: number;
   error: string | null;
 }
 
 export function useAudioEngine(options?: {
-  chunkIntervalMinutes?: number; // rolling chunk period for 30m+ sessions
+  chunkIntervalMinutes?: number;
   onChunkReady?: (chunkBlob: Blob | string, chunkIndex: number) => void;
 }) {
   const chunkIntervalSec = (options?.chunkIntervalMinutes ?? 10) * 60;
+  const nativeRecorder = useAudioRecorder({
+    ...RecordingPresets.HIGH_QUALITY,
+    isMeteringEnabled: true,
+  });
+  const nativeRecorderState = useAudioRecorderState(nativeRecorder, 250);
 
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [durationSeconds, setDurationSeconds] = useState(0);
-  const [audioLevel, setAudioLevel] = useState(0.3);
+  const [audioLevel, setAudioLevel] = useState(0.08);
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  // References for cross-platform audio recording
-  const mediaRecorderRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const timerIntervalRef = useRef<any>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number | null>(null);
-  const lastRecordedBase64Ref = useRef<string | null>(null);
 
-  // Clean up on unmount
+  useEffect(() => {
+    if (Platform.OS !== "web" || !isRecording) return;
+
+    timerIntervalRef.current = setInterval(() => {
+      setDurationSeconds((previous) => previous + 1);
+    }, 1000);
+
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+    };
+  }, [isRecording]);
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !isRecording) return;
+
+    const duration = Math.floor((nativeRecorderState.durationMillis || 0) / 1000);
+    if (duration > 0) setDurationSeconds(duration);
+
+    const meter = nativeRecorderState.metering;
+    if (typeof meter === "number") {
+      setAudioLevel(Math.min(1, Math.max(0.05, (meter + 60) / 60)));
+    }
+  }, [isRecording, nativeRecorderState.durationMillis, nativeRecorderState.metering]);
+
   useEffect(() => {
     return () => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -43,218 +79,220 @@ export function useAudioEngine(options?: {
       if (audioStreamRef.current) {
         audioStreamRef.current.getTracks().forEach((track) => track.stop());
       }
+      audioContextRef.current?.close().catch(() => undefined);
     };
   }, []);
 
-  const startRecording = useCallback(async () => {
+  const showPermissionError = useCallback((message: string) => {
+    setError(message);
+    if (Platform.OS !== "web") {
+      Alert.alert("Microphone Access Needed", message);
+    }
+  }, []);
+
+  const startRecording = useCallback(async (): Promise<boolean> => {
     setError(null);
     setDurationSeconds(0);
     setCurrentChunkIndex(0);
     audioChunksRef.current = [];
-    lastRecordedBase64Ref.current = null;
 
-    if (Platform.OS !== "web") {
-      try {
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      } catch {}
-    }
+    try {
+      const permission = await requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        showPermissionError(
+          "FlowType cannot record without microphone access. Enable Microphone for FlowType in your device settings, then try again.",
+        );
+        return false;
+      }
 
-    if (Platform.OS === "web") {
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error("Microphone access not supported in this browser environment");
-        }
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
-        audioStreamRef.current = stream;
-
-        // Setup Web Audio Analyser for realistic audio levels
+      if (Platform.OS !== "web") {
+        await nativeRecorder.prepareToRecordAsync();
+        nativeRecorder.record();
+        setIsRecording(true);
+        setIsPaused(false);
+        setAudioLevel(0.16);
         try {
-          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          const source = audioCtx.createMediaStreamSource(stream);
-          const analyser = audioCtx.createAnalyser();
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        } catch {}
+        return true;
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        throw new Error("This browser does not support microphone recording.");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      audioStreamRef.current = stream;
+
+      try {
+        const AudioContextConstructor = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextConstructor) {
+          const audioContext = new AudioContextConstructor();
+          const source = audioContext.createMediaStreamSource(stream);
+          const analyser = audioContext.createAnalyser();
           analyser.fftSize = 64;
           source.connect(analyser);
+          audioContextRef.current = audioContext;
           analyserRef.current = analyser;
 
           const updateAudioMeter = () => {
             if (!analyserRef.current) return;
             const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
             analyserRef.current.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
-            }
-            const avg = sum / dataArray.length;
-            const normalized = Math.min(1.0, Math.max(0.1, avg / 128));
-            setAudioLevel(normalized);
+            const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+            setAudioLevel(Math.min(1, Math.max(0.05, average / 128)));
             animFrameRef.current = requestAnimationFrame(updateAudioMeter);
           };
           updateAudioMeter();
-        } catch (meterErr) {
-          console.warn("Audio meter setup warning:", meterErr);
         }
+      } catch (meterError) {
+        console.warn("Audio meter setup warning:", meterError);
+      }
 
-        // Setup MediaRecorder
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : MediaRecorder.isTypeSupported("audio/mp4")
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/mp4")
           ? "audio/mp4"
           : "";
-
-        const recorder = mimeType
-          ? new MediaRecorder(stream, { mimeType })
-          : new MediaRecorder(stream);
-
-        mediaRecorderRef.current = recorder;
-
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            audioChunksRef.current.push(e.data);
-          }
-        };
-
-        recorder.onstop = async () => {
-          const audioBlob = new Blob(audioChunksRef.current, {
-            type: recorder.mimeType || "audio/webm",
-          });
-
-          // Convert to base64
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64data = reader.result as string;
-            lastRecordedBase64Ref.current = base64data;
-          };
-          reader.readAsDataURL(audioBlob);
-        };
-
-        recorder.start(1000); // 1-second chunks for stream stability
-        setIsRecording(true);
-        setIsPaused(false);
-
-        // Start duration timer
-        timerIntervalRef.current = setInterval(() => {
-          setDurationSeconds((prev) => prev + 1);
-        }, 1000);
-      } catch (err: any) {
-        console.error("Failed to start recording on web:", err);
-        setError(err.message || "Failed to access microphone");
-        Alert.alert("Microphone Error", "Please allow microphone permissions to dictate.");
-      }
-    } else {
-      // Native mobile mock fallback/simulator
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.start(1000);
       setIsRecording(true);
       setIsPaused(false);
-      timerIntervalRef.current = setInterval(() => {
-        setDurationSeconds((prev) => prev + 1);
-        setAudioLevel(0.2 + Math.random() * 0.6);
-      }, 1000);
+      return true;
+    } catch (recordingError) {
+      console.error("Failed to start recording:", recordingError);
+      const message = recordingError instanceof Error ? recordingError.message : "Failed to access the microphone.";
+      showPermissionError(message);
+      audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+      return false;
     }
-  }, [chunkIntervalSec]);
+  }, [nativeRecorder, showPermissionError]);
 
   const pauseRecording = useCallback(() => {
     if (!isRecording) return;
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+    if (Platform.OS !== "web") {
+      nativeRecorder.pause();
+    } else if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.pause();
-    }
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
     }
     setIsPaused(true);
     if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     }
-  }, [isRecording]);
+  }, [isRecording, nativeRecorder]);
 
   const resumeRecording = useCallback(() => {
     if (!isRecording || !isPaused) return;
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
+    if (Platform.OS !== "web") {
+      nativeRecorder.record();
+    } else if (mediaRecorderRef.current?.state === "paused") {
       mediaRecorderRef.current.resume();
     }
-    timerIntervalRef.current = setInterval(() => {
-      setDurationSeconds((prev) => prev + 1);
-    }, 1000);
     setIsPaused(false);
     if (Platform.OS !== "web") {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     }
-  }, [isRecording, isPaused]);
+  }, [isPaused, isRecording, nativeRecorder]);
 
   const stopRecording = useCallback(async (): Promise<{
     base64: string | null;
     duration: number;
     mimeType: string;
   }> => {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (audioContextRef.current) {
+      await audioContextRef.current.close().catch(() => undefined);
+      audioContextRef.current = null;
     }
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-    }
+
+    const finalDuration = Platform.OS === "web"
+      ? durationSeconds
+      : Math.max(durationSeconds, Math.floor((nativeRecorderState.durationMillis || 0) / 1000));
 
     if (Platform.OS !== "web") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-
-    const finalDuration = durationSeconds;
-
-    return new Promise((resolve) => {
-      if (Platform.OS === "web" && mediaRecorderRef.current) {
-        const recorder = mediaRecorderRef.current;
-        const mimeType = recorder.mimeType || "audio/webm";
-
-        recorder.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64 = reader.result as string;
-            lastRecordedBase64Ref.current = base64;
-
-            // Stop all audio stream tracks
-            if (audioStreamRef.current) {
-              audioStreamRef.current.getTracks().forEach((t) => t.stop());
-              audioStreamRef.current = null;
-            }
-
-            setIsRecording(false);
-            setIsPaused(false);
-            resolve({
-              base64,
-              duration: finalDuration,
-              mimeType,
-            });
-          };
-          reader.readAsDataURL(audioBlob);
-        };
-
-        if (recorder.state !== "inactive") {
-          recorder.stop();
-        } else {
-          setIsRecording(false);
-          setIsPaused(false);
-          resolve({
-            base64: lastRecordedBase64Ref.current,
-            duration: finalDuration,
-            mimeType: "audio/webm",
-          });
-        }
-      } else {
+      try {
+        await nativeRecorder.stop();
+        const uri = nativeRecorder.uri;
         setIsRecording(false);
         setIsPaused(false);
-        resolve({
-          base64: null,
+        if (!uri) {
+          throw new Error("The microphone stopped without producing an audio file.");
+        }
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        if (!base64) throw new Error("The microphone produced an empty audio file.");
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+        return {
+          base64: `data:audio/m4a;base64,${base64}`,
           duration: finalDuration,
           mimeType: "audio/m4a",
-        });
+        };
+      } catch (recordingError) {
+        setIsRecording(false);
+        setIsPaused(false);
+        const message = recordingError instanceof Error ? recordingError.message : "Recording could not be saved.";
+        setError(message);
+        throw new Error(message);
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder) {
+        setIsRecording(false);
+        setIsPaused(false);
+        reject(new Error("No active microphone recording was found."));
+        return;
+      }
+
+      const mimeType = recorder.mimeType || "audio/webm";
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (!audioBlob.size) {
+          setIsRecording(false);
+          setIsPaused(false);
+          reject(new Error("The microphone produced an empty audio recording."));
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+          audioStreamRef.current = null;
+          mediaRecorderRef.current = null;
+          setIsRecording(false);
+          setIsPaused(false);
+          resolve({ base64: dataUrl, duration: finalDuration, mimeType });
+        };
+        reader.onerror = () => reject(new Error("The browser could not read the recorded audio."));
+        reader.readAsDataURL(audioBlob);
+      };
+
+      if (recorder.state !== "inactive") {
+        recorder.stop();
+      } else {
+        reject(new Error("The microphone recording was already stopped."));
       }
     });
-  }, [durationSeconds]);
+  }, [durationSeconds, nativeRecorder, nativeRecorderState.durationMillis]);
 
   return {
     isRecording,
@@ -277,9 +315,9 @@ export function formatTimeClock(seconds: number): string {
   const remainingMins = mins % 60;
 
   if (hours > 0) {
-    return `${hours.toString().padStart(2, "0")}:${remainingMins
+    return `${hours.toString().padStart(2, "0")}:${remainingMins.toString().padStart(2, "0")}:${secs
       .toString()
-      .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+      .padStart(2, "0")}`;
   }
   return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 }

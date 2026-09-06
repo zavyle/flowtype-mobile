@@ -11,3 +11,10 @@
 - [x] Settings Screen: 30m+ session configuration, chunk duration, wake-lock toggle, filler word removal, default style, and language selection
 - [x] End-to-end verification and visual testing with webdev_take_screenshot
 - [x] Final checkpoint and delivery
+
+- [x] Bug: explicit microphone permission prompt is missing on native and web recording paths
+- [x] Bug: Dictate flow does not capture spoken audio or produce real transcription for a simple test phrase
+- [x] Bug: repeated demo Welcome to FlowType sessions are being persisted into History instead of real captures
+- [x] Bug: failed microphone/recording states need visible error feedback and must not create fake sessions
+- [x] Verify permission, recording lifecycle, transcription fallback, and clean History behavior on web and native-compatible paths
+- [x] Save bug-fix checkpoint and deliver updated build

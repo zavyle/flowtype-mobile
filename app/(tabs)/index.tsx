@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import {
   ScrollView,
   Text,
@@ -31,6 +31,7 @@ export default function DictationHomeScreen() {
   const [currentSession, setCurrentSession] = useState<TranscriptionSession | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [customVocabTerms, setCustomVocabTerms] = useState<string[]>([]);
 
@@ -54,6 +55,7 @@ export default function DictationHomeScreen() {
     pauseRecording,
     resumeRecording,
     stopRecording,
+    error: recordingError,
   } = useAudioEngine({
     chunkIntervalMinutes: 10,
   });
@@ -69,6 +71,9 @@ export default function DictationHomeScreen() {
       setStatusMessage("Finalizing audio & transcribing with Whisper...");
       try {
         const recorded = await stopRecording();
+        if (!recorded.base64) {
+          throw new Error("No audio was captured. Check microphone access and try again.");
+        }
 
         let resultText = "";
         let rawText = "";
@@ -87,12 +92,10 @@ export default function DictationHomeScreen() {
           rawText = res.rawText;
           resultText = res.formattedText;
           returnedAudioUrl = res.audioUrl;
-        } else {
-          // Fallback demo text if no audio recorded in emulator
-          rawText =
-            "Welcome to FlowType. This is an extended dictation session demonstrating seamless voice capture exceeding 30 minutes with instant AI formatting and zero lag.";
-          resultText =
-            "Welcome to FlowType. This is an extended dictation session demonstrating seamless voice capture exceeding 30 minutes with instant AI formatting and zero lag.";
+        }
+
+        if (!rawText.trim() || !resultText.trim()) {
+          throw new Error("No speech was detected. Speak closer to the microphone and try again.");
         }
 
         const newSession: TranscriptionSession = {
@@ -115,17 +118,19 @@ export default function DictationHomeScreen() {
 
         await saveSession(newSession);
         setCurrentSession(newSession);
+        setLastError(null);
       } catch (err: any) {
         console.error("Transcription failed:", err);
-        setStatusMessage("Error transcribing. Saved locally.");
+        setLastError(err?.message || "Recording or transcription failed. No session was saved.");
       } finally {
         setIsProcessing(false);
         setStatusMessage(null);
       }
     } else {
-      // Start recording
       setCurrentSession(null);
-      await startRecording();
+      setLastError(null);
+      const started = await startRecording();
+      if (!started) setLastError(recordingError || "Microphone access was not granted.");
     }
   };
 
@@ -314,6 +319,13 @@ export default function DictationHomeScreen() {
           </View>
         )}
 
+        {(lastError || recordingError) && !isProcessing && (
+          <View style={styles.errorCard}>
+            <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#F87171" />
+            <Text style={styles.errorCardText}>{lastError || recordingError}</Text>
+          </View>
+        )}
+
         {/* Result Transcript Card */}
         {currentSession ? (
           <View style={styles.resultCard}>
@@ -377,7 +389,7 @@ export default function DictationHomeScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyPromptTitle}>Speak naturally at 3x typing speed</Text>
             <Text style={styles.emptyPromptSub}>
-              Tap the microphone below to dictate. FlowType automatically strips "ums", fixes syntax, and re-formats into your chosen style. For lectures or meetings beyond 30 mins, toggle 30m+ Session.
+              Tap the microphone below to dictate. FlowType automatically strips &quot;ums&quot;, fixes syntax, and re-formats into your chosen style. For lectures or meetings beyond 30 mins, toggle 30m+ Session.
             </Text>
 
             <View style={styles.suggestionsGrid}>
@@ -595,6 +607,23 @@ const styles = StyleSheet.create({
     color: "#818CF8",
     fontSize: 13,
     fontWeight: "600",
+  },
+  errorCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    borderColor: "rgba(239, 68, 68, 0.3)",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  errorCardText: {
+    flex: 1,
+    color: "#FCA5A5",
+    fontSize: 13,
+    lineHeight: 18,
   },
   resultCard: {
     backgroundColor: "#181B26",

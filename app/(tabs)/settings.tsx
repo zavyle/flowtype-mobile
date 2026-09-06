@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Switch,
-  Alert,
 } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -144,7 +143,7 @@ export default function SettingsScreen() {
               <View style={styles.rowInfo}>
                 <Text style={styles.rowLabel}>Remove Filler Words</Text>
                 <Text style={styles.rowSub}>
-                  Filters out "um", "uh", "like", "you know", and stuttered syllables
+                  Filters out &quot;um&quot;, &quot;uh&quot;, &quot;like&quot;, &quot;you know&quot;, and stuttered syllables
                 </Text>
               </View>
               <Switch

@@ -55,7 +55,7 @@ export function WaveformVisualizer({
     }, 120);
 
     return () => clearInterval(interval);
-  }, [isRecording, isPaused, decibelLevel, barCount]);
+  }, [animatedValues, isRecording, isPaused, decibelLevel, barCount]);
 
   return (
     <View style={styles.container}>
