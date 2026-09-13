@@ -172,6 +172,13 @@ export default function HistoryScreen() {
             <Text style={styles.emptySub}>
               Dictate on the main screen to create transcripts and recordings.
             </Text>
+            <TouchableOpacity
+              style={styles.emptyAction}
+              onPress={() => router.replace("/")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.emptyActionText}>Start a Dictation</Text>
+            </TouchableOpacity>
           </View>
         }
         renderItem={({ item }) => {
@@ -440,5 +447,17 @@ const styles = StyleSheet.create({
     color: "#64748B",
     fontSize: 12,
     textAlign: "center",
+  },
+  emptyAction: {
+    marginTop: 8,
+    backgroundColor: "#6366F1",
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  emptyActionText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

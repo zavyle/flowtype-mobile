@@ -23,11 +23,13 @@ import {
   TranscriptionSession,
 } from "@/lib/sessionStore";
 import * as Haptics from "expo-haptics";
+import { activateKeepAwake, deactivateKeepAwake } from "expo-keep-awake";
 
 export default function DictationHomeScreen() {
   const [selectedStyle, setSelectedStyle] = useState<FormattingStyle>("clean_voice");
   const [isLongSessionMode, setIsLongSessionMode] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState("auto");
+  const [keepScreenAwake, setKeepScreenAwake] = useState(true);
   const [currentSession, setCurrentSession] = useState<TranscriptionSession | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -43,6 +45,7 @@ export default function DictationHomeScreen() {
       const settings = await getSettings();
       setSelectedStyle(settings.defaultStyle);
       setTargetLanguage(settings.defaultLanguage);
+      setKeepScreenAwake(settings.keepScreenAwake);
     })();
   }, []);
 
@@ -56,9 +59,19 @@ export default function DictationHomeScreen() {
     resumeRecording,
     stopRecording,
     error: recordingError,
+    isStarting,
+    permissionStatus,
   } = useAudioEngine({
     chunkIntervalMinutes: 10,
   });
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !isRecording || !keepScreenAwake) return;
+    void activateKeepAwake("flowtype-recording").catch(() => undefined);
+    return () => {
+      void deactivateKeepAwake("flowtype-recording").catch(() => undefined);
+    };
+  }, [isRecording, keepScreenAwake]);
 
   // tRPC Mutations
   const transcribeMutation = trpc.voice.transcribeAudioChunk.useMutation();
@@ -98,16 +111,29 @@ export default function DictationHomeScreen() {
           throw new Error("No speech was detected. Speak closer to the microphone and try again.");
         }
 
+        const sessionDuration = Math.max(1, recorded.duration || durationSeconds || 0);
+        const sessionId = `session_${Date.now()}`;
         const newSession: TranscriptionSession = {
-          id: `session_${Date.now()}`,
+          id: sessionId,
           title:
             rawText.slice(0, 48).trim() + (rawText.length > 48 ? "..." : "") ||
             `Voice Dictation ${new Date().toLocaleTimeString()}`,
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          duration: recorded.duration || durationSeconds || 5,
-          isLongSession: isLongSessionMode || (recorded.duration || 0) > 1800,
-          chunks: [],
+          duration: sessionDuration,
+          isLongSession: isLongSessionMode || sessionDuration > 1800,
+          chunks: [
+            {
+              id: `${sessionId}_chunk_0`,
+              chunkIndex: 0,
+              startTime: 0,
+              endTime: sessionDuration,
+              duration: sessionDuration,
+              rawText,
+              audioUrl: returnedAudioUrl,
+              status: "completed",
+            },
+          ],
           rawText,
           formattedText: resultText,
           style: selectedStyle,
@@ -130,7 +156,7 @@ export default function DictationHomeScreen() {
       setCurrentSession(null);
       setLastError(null);
       const started = await startRecording();
-      if (!started) setLastError(recordingError || "Microphone access was not granted.");
+      if (!started.ok) setLastError(started.error);
     }
   };
 
@@ -239,6 +265,21 @@ export default function DictationHomeScreen() {
           />
         </View>
 
+        {!isRecording && !isProcessing && !isStarting && permissionStatus !== "granted" && (
+          <View style={[styles.permissionHint, permissionStatus === "denied" && styles.permissionHintDenied]}>
+            <IconSymbol
+              name={permissionStatus === "denied" ? "exclamationmark.triangle.fill" : "mic.fill"}
+              size={15}
+              color={permissionStatus === "denied" ? "#F59E0B" : "#818CF8"}
+            />
+            <Text style={styles.permissionHintText}>
+              {permissionStatus === "denied"
+                ? "Microphone access is blocked. Tap to Dictate after enabling microphone access in your device or browser settings."
+                : "Microphone access will be requested when you tap to Dictate. Your audio is captured only during an active recording."}
+            </Text>
+          </View>
+        )}
+
         {/* Live Audio / Recording Dashboard Card */}
         <View style={[styles.dashboardCard, isRecording && styles.dashboardCardRecording]}>
           <View style={styles.dashHeader}>
@@ -246,11 +287,17 @@ export default function DictationHomeScreen() {
               <View
                 style={[
                   styles.statusDot,
-                  isRecording ? styles.statusDotHot : styles.statusDotIdle,
+                  isStarting
+                    ? styles.statusDotStarting
+                    : isRecording
+                    ? styles.statusDotHot
+                    : styles.statusDotIdle,
                 ]}
               />
               <Text style={styles.statusText}>
-                {isRecording
+                {isStarting
+                  ? "REQUESTING MICROPHONE"
+                  : isRecording
                   ? isPaused
                     ? "RECORDING PAUSED"
                     : isLongSessionMode
@@ -283,7 +330,7 @@ export default function DictationHomeScreen() {
             <View style={styles.longSessionBanner}>
               <IconSymbol name="info.circle" size={14} color="#A78BFA" />
               <Text style={styles.longSessionText}>
-                Infinite recording active • Auto-saves memory in 10-min rolling chunks • Keep-Awake active
+                Extended recording mode • Saves the complete session when you stop • Keep-Awake active when enabled
               </Text>
             </View>
           )}
@@ -319,10 +366,22 @@ export default function DictationHomeScreen() {
           </View>
         )}
 
-        {(lastError || recordingError) && !isProcessing && (
+        {(lastError || recordingError) && !isProcessing && !isRecording && (
           <View style={styles.errorCard}>
             <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#F87171" />
-            <Text style={styles.errorCardText}>{lastError || recordingError}</Text>
+            <View style={styles.errorCardContent}>
+              <Text style={styles.errorCardText}>{lastError || recordingError}</Text>
+              <TouchableOpacity
+                style={styles.errorRetry}
+                onPress={() => {
+                  setLastError(null);
+                  void handleToggleRecord();
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.errorRetryText}>Try again</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -419,13 +478,13 @@ export default function DictationHomeScreen() {
           style={[
             styles.primaryDictateBtn,
             isRecording && styles.primaryDictateBtnHot,
-            isProcessing && styles.primaryDictateBtnProcessing,
+            (isProcessing || isStarting) && styles.primaryDictateBtnProcessing,
           ]}
           onPress={handleToggleRecord}
-          disabled={isProcessing}
+          disabled={isProcessing || isStarting}
           activeOpacity={0.85}
         >
-          {isProcessing ? (
+          {isProcessing || isStarting ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
             <IconSymbol
@@ -435,7 +494,9 @@ export default function DictationHomeScreen() {
             />
           )}
           <Text style={styles.primaryDictateText}>
-            {isRecording
+            {isStarting
+              ? "Requesting Microphone..."
+              : isRecording
               ? "Tap to Complete Dictation"
               : isProcessing
               ? "Processing Voice..."
@@ -539,6 +600,9 @@ const styles = StyleSheet.create({
   statusDotHot: {
     backgroundColor: "#EF4444",
   },
+  statusDotStarting: {
+    backgroundColor: "#F59E0B",
+  },
   statusText: {
     fontSize: 11,
     fontWeight: "700",
@@ -591,6 +655,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
+  permissionHint: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "rgba(99, 102, 241, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(99, 102, 241, 0.18)",
+    borderRadius: 12,
+    padding: 11,
+    marginBottom: 12,
+  },
+  permissionHintDenied: {
+    backgroundColor: "rgba(245, 158, 11, 0.08)",
+    borderColor: "rgba(245, 158, 11, 0.22)",
+  },
+  permissionHintText: {
+    flex: 1,
+    color: "#94A3B8",
+    fontSize: 12,
+    lineHeight: 17,
+  },
   processingBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -619,11 +704,26 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
   },
-  errorCardText: {
+  errorCardContent: {
     flex: 1,
+    gap: 8,
+  },
+  errorCardText: {
     color: "#FCA5A5",
     fontSize: 13,
     lineHeight: 18,
+  },
+  errorRetry: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(239, 68, 68, 0.18)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  errorRetryText: {
+    color: "#FCA5A5",
+    fontSize: 12,
+    fontWeight: "700",
   },
   resultCard: {
     backgroundColor: "#181B26",

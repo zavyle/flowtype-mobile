@@ -18,3 +18,15 @@
 - [x] Bug: failed microphone/recording states need visible error feedback and must not create fake sessions
 - [x] Verify permission, recording lifecycle, transcription fallback, and clean History behavior on web and native-compatible paths
 - [x] Save bug-fix checkpoint and deliver updated build
+
+
+# Next Improvement Milestone
+
+- [x] Improve dictate screen recording-state clarity with permission, listening, paused, processing, and failure guidance
+- [x] Add a visible microphone readiness check before recording begins
+- [x] Add real-time capture feedback so users can distinguish silence, active speech, and processing
+- [x] Improve no-speech and transcription-failure recovery without saving incomplete sessions
+- [x] Preserve and surface long-session progress, chunk status, and recovery state
+- [x] Polish History and session detail actions for faster copy, share, playback, and reformatting
+- [x] Run regression tests, preview screenshots, and mobile-compatible validation
+- [x] Save and deliver the next stable FlowType checkpoint

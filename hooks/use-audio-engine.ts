@@ -3,6 +3,7 @@ import { Platform, Alert } from "react-native";
 import * as Haptics from "expo-haptics";
 import {
   RecordingPresets,
+  getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
@@ -36,6 +37,8 @@ export function useAudioEngine(options?: {
   const [audioLevel, setAudioLevel] = useState(0.08);
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [permissionStatus, setPermissionStatus] = useState<"unknown" | "granted" | "denied" | "undetermined">("unknown");
+  const [isStarting, setIsStarting] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -44,6 +47,21 @@ export function useAudioEngine(options?: {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    getRecordingPermissionsAsync()
+      .then((permission) => {
+        if (!mounted) return;
+        setPermissionStatus(permission.granted ? "granted" : permission.status === "denied" ? "denied" : "undetermined");
+      })
+      .catch(() => {
+        if (mounted) setPermissionStatus("unknown");
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== "web" || !isRecording) return;
@@ -90,19 +108,26 @@ export function useAudioEngine(options?: {
     }
   }, []);
 
-  const startRecording = useCallback(async (): Promise<boolean> => {
+  const startRecording = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
     setError(null);
+    setIsStarting(true);
     setDurationSeconds(0);
     setCurrentChunkIndex(0);
     audioChunksRef.current = [];
 
     try {
       const permission = await requestRecordingPermissionsAsync();
+      const nextPermissionStatus = permission.granted
+        ? "granted"
+        : permission.status === "denied"
+          ? "denied"
+          : "undetermined";
+      setPermissionStatus(nextPermissionStatus);
       if (!permission.granted) {
-        showPermissionError(
-          "FlowType cannot record without microphone access. Enable Microphone for FlowType in your device settings, then try again.",
-        );
-        return false;
+        const permissionMessage =
+          "FlowType cannot record without microphone access. Enable Microphone for FlowType in your device settings, then try again.";
+        showPermissionError(permissionMessage);
+        return { ok: false, error: permissionMessage };
       }
 
       await setAudioModeAsync({
@@ -119,7 +144,7 @@ export function useAudioEngine(options?: {
         try {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         } catch {}
-        return true;
+        return { ok: true };
       }
 
       if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
@@ -173,14 +198,16 @@ export function useAudioEngine(options?: {
       recorder.start(1000);
       setIsRecording(true);
       setIsPaused(false);
-      return true;
+      return { ok: true };
     } catch (recordingError) {
       console.error("Failed to start recording:", recordingError);
       const message = recordingError instanceof Error ? recordingError.message : "Failed to access the microphone.";
       showPermissionError(message);
       audioStreamRef.current?.getTracks().forEach((track) => track.stop());
       audioStreamRef.current = null;
-      return false;
+      return { ok: false, error: message };
+    } finally {
+      setIsStarting(false);
     }
   }, [nativeRecorder, showPermissionError]);
 
@@ -301,6 +328,8 @@ export function useAudioEngine(options?: {
     audioLevel,
     currentChunkIndex,
     error,
+    isStarting,
+    permissionStatus,
     startRecording,
     pauseRecording,
     resumeRecording,
