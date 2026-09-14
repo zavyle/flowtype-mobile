@@ -30,3 +30,13 @@
 - [x] Polish History and session detail actions for faster copy, share, playback, and reformatting
 - [x] Run regression tests, preview screenshots, and mobile-compatible validation
 - [x] Save and deliver the next stable FlowType checkpoint
+
+
+# Recorder Import Milestone
+
+- [x] Add WAV/MP3/M4A recorder-file picker with safe size and MIME validation
+- [x] Send imported audio through the existing Whisper and AI-formatting pipeline
+- [x] Save imported recordings as real History sessions with audio and chunk metadata
+- [x] Add AIREC transfer instructions and an Import Recorder Audio action
+- [x] Verify import UI, regression tests, and mobile preview behavior
+- [x] Save and deliver the recorder-import checkpoint

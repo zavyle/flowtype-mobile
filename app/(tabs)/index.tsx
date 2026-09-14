@@ -22,6 +22,7 @@ import {
   getSettings,
   TranscriptionSession,
 } from "@/lib/sessionStore";
+import { pickAudioRecording } from "@/lib/audioImport";
 import * as Haptics from "expo-haptics";
 import { activateKeepAwake, deactivateKeepAwake } from "expo-keep-awake";
 
@@ -32,6 +33,7 @@ export default function DictationHomeScreen() {
   const [keepScreenAwake, setKeepScreenAwake] = useState(true);
   const [currentSession, setCurrentSession] = useState<TranscriptionSession | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
@@ -160,6 +162,72 @@ export default function DictationHomeScreen() {
     }
   };
 
+  const handleImportRecording = async () => {
+    if (isRecording || isProcessing || isImporting) return;
+    setLastError(null);
+    setCurrentSession(null);
+    setIsImporting(true);
+    setIsProcessing(true);
+    try {
+      const imported = await pickAudioRecording();
+      if (!imported) return;
+
+      setStatusMessage(`Importing ${imported.name}...`);
+      const res = await transcribeMutation.mutateAsync({
+        audioBase64: imported.base64,
+        mimeType: imported.mimeType,
+        language: targetLanguage,
+        style: selectedStyle,
+        customVocabulary: customVocabTerms,
+      });
+
+      if (!res.rawText.trim() || !res.formattedText.trim()) {
+        throw new Error("No speech was detected in this recording. Try a clearer export from the recorder.");
+      }
+
+      const sessionDuration = Math.max(1, res.duration || 0);
+      const sessionId = `import_${Date.now()}`;
+      const importedSession: TranscriptionSession = {
+        id: sessionId,
+        title:
+          res.rawText.slice(0, 48).trim() + (res.rawText.length > 48 ? "..." : "") || imported.name,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        duration: sessionDuration,
+        isLongSession: sessionDuration >= 1800,
+        chunks: [
+          {
+            id: `${sessionId}_chunk_0`,
+            chunkIndex: 0,
+            startTime: 0,
+            endTime: sessionDuration,
+            duration: sessionDuration,
+            rawText: res.rawText,
+            audioUrl: res.audioUrl,
+            status: "completed",
+          },
+        ],
+        rawText: res.rawText,
+        formattedText: res.formattedText,
+        style: selectedStyle,
+        language: targetLanguage,
+        audioUrl: res.audioUrl,
+        wordCount: res.formattedText.split(/\s+/).filter(Boolean).length,
+      };
+
+      await saveSession(importedSession);
+      setCurrentSession(importedSession);
+      setStatusMessage(`Imported ${imported.name} successfully.`);
+    } catch (err) {
+      console.error("Audio import failed:", err);
+      setLastError(err instanceof Error ? err.message : "Could not import this recording.");
+    } finally {
+      setIsImporting(false);
+      setIsProcessing(false);
+      setTimeout(() => setStatusMessage(null), 2200);
+    }
+  };
+
   const handleChangeStyle = async (newStyle: FormattingStyle) => {
     setSelectedStyle(newStyle);
     if (Platform.OS !== "web") {
@@ -254,6 +322,27 @@ export default function DictationHomeScreen() {
               {isLongSessionMode ? "30m+ Session" : "Quick Dictate"}
             </Text>
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.importRow}>
+          <TouchableOpacity
+            style={styles.importPill}
+            onPress={handleImportRecording}
+            disabled={isProcessing || isRecording || isStarting}
+            activeOpacity={0.8}
+          >
+            {isImporting ? (
+              <ActivityIndicator size="small" color="#6366F1" />
+            ) : (
+              <IconSymbol name="doc.on.doc" size={14} color="#6366F1" />
+            )}
+            <Text style={styles.importPillText}>
+              {isImporting ? "Importing Recording..." : "Import Recorder Audio"}
+            </Text>
+          </TouchableOpacity>
+          <Text style={styles.importHint}>
+            AIREC: transfer the WAV file to your phone, then import it here. Direct share-in is not enabled yet.
+          </Text>
         </View>
 
         {/* Style Selector Carousel */}
@@ -552,8 +641,34 @@ const styles = StyleSheet.create({
   modePillTextActive: {
     color: "#FFFFFF",
   },
+  importRow: {
+    marginBottom: 14,
+    gap: 7,
+  },
+  importPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 7,
+    borderWidth: 1,
+    borderColor: "rgba(99, 102, 241, 0.3)",
+    backgroundColor: "rgba(99, 102, 241, 0.08)",
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  importPillText: {
+    color: "#818CF8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  importHint: {
+    color: "#64748B",
+    fontSize: 11,
+    lineHeight: 15,
+  },
   styleSection: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
   sectionLabel: {
     fontSize: 11,
