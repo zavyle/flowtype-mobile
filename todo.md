@@ -48,3 +48,6 @@
 - [x] Create continuation documentation for another AI agent, including architecture, current features, known limitations, and next tasks
 - [ ] Publish the sanitized FlowType source to GitHub or provide an accessible repository alternative
 - [ ] Verify the published repository and deliver its access details
+
+- [ ] Push sanitized FlowType source to `zavyle/Voice-Notes` branch `flowtype-handoff` without modifying `main`
+- [ ] Verify the branch URL, latest commit, and handoff documentation on GitHub
