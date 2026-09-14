@@ -40,3 +40,11 @@
 - [x] Add AIREC transfer instructions and an Import Recorder Audio action
 - [x] Verify import UI, regression tests, and mobile preview behavior
 - [x] Save and deliver the recorder-import checkpoint
+
+
+# External Handoff Milestone
+
+- [x] Audit the repository for secrets, generated files, and unpublished credentials before external sharing
+- [x] Create continuation documentation for another AI agent, including architecture, current features, known limitations, and next tasks
+- [ ] Publish the sanitized FlowType source to GitHub or provide an accessible repository alternative
+- [ ] Verify the published repository and deliver its access details
