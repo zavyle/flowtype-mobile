@@ -51,3 +51,12 @@
 
 - [x] Push sanitized FlowType source to `zavyle/Voice-Notes` branch `flowtype-handoff` without modifying `main` (blocked: GitHub integration returned 403; no repository content was changed)
 - [x] Verify GitHub branch publication was blocked with 403 and confirm `Voice-Notes/main` was not modified
+
+
+# GitHub Repository Publication
+
+- [x] Prepare and audit the sanitized FlowType ZIP for publication
+- [x] Create private GitHub repository `flowtype-mobile`
+- [x] Push the unpacked FlowType source to the new repository
+- [x] Verify repository contents, privacy, branch state, and handoff documentation
+- [x] Deliver the repository URL and continuation instructions
