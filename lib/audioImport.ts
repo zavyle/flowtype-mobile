@@ -4,6 +4,32 @@ import * as FileSystem from "expo-file-system/legacy";
 
 const MAX_IMPORT_BYTES = 35 * 1024 * 1024;
 
+const EXTENSION_TO_MIME: Record<string, string> = {
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  mp3: "audio/mpeg",
+  mp4: "audio/mp4",
+  mpeg: "audio/mpeg",
+  mpga: "audio/mpeg",
+  oga: "audio/ogg",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+  webm: "audio/webm",
+};
+
+const MIME_ALIASES: Record<string, string> = {
+  "application/ogg": "audio/ogg",
+  "audio/x-flac": "audio/flac",
+  "audio/x-m4a": "audio/mp4",
+  "audio/x-mp3": "audio/mpeg",
+  "audio/x-wav": "audio/wav",
+  "audio/wave": "audio/wav",
+  "audio/x-wave": "audio/wav",
+  "video/mp4": "audio/mp4",
+};
+
+const SUPPORTED_FORMATS = "FLAC, M4A, MP3, MP4, MPEG, MPGA, OGA, OGG, WAV, WEBM";
+
 export interface ImportedAudioFile {
   name: string;
   uri: string;
@@ -12,14 +38,14 @@ export interface ImportedAudioFile {
   base64: string;
 }
 
-function inferMimeType(name: string, mimeType?: string | null): string {
-  if (mimeType && mimeType !== "application/octet-stream") return mimeType;
+function inferMimeType(name: string, mimeType?: string | null): string | null {
+  const normalizedMime = mimeType?.split(";", 1)[0]?.trim().toLowerCase();
+  if (normalizedMime && normalizedMime !== "application/octet-stream") {
+    return EXTENSION_TO_MIME[normalizedMime.replace(/^audio\//, "")] ?? MIME_ALIASES[normalizedMime] ?? null;
+  }
+
   const extension = name.split(".").pop()?.toLowerCase();
-  if (extension === "wav") return "audio/wav";
-  if (extension === "mp3") return "audio/mpeg";
-  if (extension === "m4a" || extension === "mp4") return "audio/mp4";
-  if (extension === "webm") return "audio/webm";
-  return "audio/wav";
+  return extension ? EXTENSION_TO_MIME[extension] ?? null : null;
 }
 
 async function readWebFileAsBase64(file: File): Promise<string> {
@@ -53,6 +79,12 @@ export async function pickAudioRecording(): Promise<ImportedAudioFile | null> {
   }
 
   const mimeType = inferMimeType(asset.name, asset.mimeType);
+  if (!mimeType) {
+    throw new Error(
+      `Unsupported audio format. FlowType supports: ${SUPPORTED_FORMATS}.`,
+    );
+  }
+
   let base64 = asset.base64;
 
   if (!base64 && Platform.OS === "web" && asset.file) {
@@ -75,3 +107,5 @@ export async function pickAudioRecording(): Promise<ImportedAudioFile | null> {
     base64,
   };
 }
+
+export { inferMimeType };
