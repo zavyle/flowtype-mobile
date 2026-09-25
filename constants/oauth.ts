@@ -1,5 +1,6 @@
 import * as Linking from "expo-linking";
 import * as ReactNative from "react-native";
+import Constants from "expo-constants";
 
 // Extract scheme from bundle ID (last segment timestamp, prefixed with "manus")
 // e.g., "space.manus.my.app.t20240115103045" -> "manus20240115103045"
@@ -24,6 +25,8 @@ export const OWNER_OPEN_ID = env.ownerId;
 export const OWNER_NAME = env.ownerName;
 export const API_BASE_URL = env.apiBaseUrl;
 
+export const DEFAULT_PRODUCTION_API_BASE_URL = "https://flowtypeapp-jlgbkqu9.manus.space";
+
 /**
  * Get the API base URL, deriving from current hostname if not set.
  * Metro runs on 8081, API server runs on 3000.
@@ -35,6 +38,12 @@ export function getApiBaseUrl(): string {
     return API_BASE_URL.replace(/\/$/, "");
   }
 
+  const expoConfig = Constants.expoConfig as (Record<string, any> | null | undefined);
+  const extraApiBaseUrl = expoConfig?.extra?.apiBaseUrl as string | undefined;
+  if (extraApiBaseUrl) {
+    return extraApiBaseUrl.replace(/\/$/, "");
+  }
+
   // On web, derive from current hostname by replacing port 8081 with 3000
   if (ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location) {
     const { protocol, hostname } = window.location;
@@ -43,10 +52,12 @@ export function getApiBaseUrl(): string {
     if (apiHostname !== hostname) {
       return `${protocol}//${apiHostname}`;
     }
+    return "";
   }
 
-  // Fallback to empty (will use relative URL)
-  return "";
+  // On native (Android/iOS standalone or Expo Go), relative URLs crash fetch with "Invalid URL".
+  // Always return the reachable backend domain.
+  return DEFAULT_PRODUCTION_API_BASE_URL;
 }
 
 export const SESSION_TOKEN_KEY = "app_session_token";

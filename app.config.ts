@@ -36,6 +36,7 @@ const env = {
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
   androidPackage: bundleId,
+  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL || "https://flowtypeapp-jlgbkqu9.manus.space",
 };
 
 const config: ExpoConfig = {
@@ -124,6 +125,12 @@ const config: ExpoConfig = {
   experiments: {
     typedRoutes: true,
     reactCompiler: true,
+  },
+  extra: {
+    eas: {
+      projectId: "29f73938-e0a4-4ae1-85c3-a27ef5805157",
+    },
+    apiBaseUrl: env.apiBaseUrl,
   },
 };
 

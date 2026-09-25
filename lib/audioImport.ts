@@ -1,6 +1,14 @@
 import { Platform } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import {
+  inferMimeType,
+  sanitizeFilename,
+  extractExtension,
+  SUPPORTED_FORMATS,
+  EXTENSION_TO_MIME,
+  MIME_ALIASES,
+} from "./audioFormat";
 
 const MAX_IMPORT_BYTES = 35 * 1024 * 1024;
 
@@ -10,16 +18,6 @@ export interface ImportedAudioFile {
   mimeType: string;
   size?: number;
   base64: string;
-}
-
-function inferMimeType(name: string, mimeType?: string | null): string {
-  if (mimeType && mimeType !== "application/octet-stream") return mimeType;
-  const extension = name.split(".").pop()?.toLowerCase();
-  if (extension === "wav") return "audio/wav";
-  if (extension === "mp3") return "audio/mpeg";
-  if (extension === "m4a" || extension === "mp4") return "audio/mp4";
-  if (extension === "webm") return "audio/webm";
-  return "audio/wav";
 }
 
 async function readWebFileAsBase64(file: File): Promise<string> {
@@ -52,7 +50,13 @@ export async function pickAudioRecording(): Promise<ImportedAudioFile | null> {
     );
   }
 
-  const mimeType = inferMimeType(asset.name, asset.mimeType);
+  const mimeType = inferMimeType(asset.name, asset.mimeType, asset.uri);
+  if (!mimeType) {
+    throw new Error(
+      `Unsupported audio format. FlowType supports: ${SUPPORTED_FORMATS}.`,
+    );
+  }
+
   let base64 = asset.base64;
 
   if (!base64 && Platform.OS === "web" && asset.file) {
@@ -68,10 +72,13 @@ export async function pickAudioRecording(): Promise<ImportedAudioFile | null> {
   if (!base64) throw new Error("FlowType could not read the selected audio file.");
 
   return {
-    name: asset.name,
+    name: sanitizeFilename(asset.name, asset.uri) || "Imported recording",
     uri: asset.uri,
     mimeType,
     size: asset.size,
     base64,
   };
 }
+
+export { inferMimeType, sanitizeFilename, extractExtension };
+export { SUPPORTED_FORMATS, EXTENSION_TO_MIME, MIME_ALIASES };

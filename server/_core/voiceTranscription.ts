@@ -69,6 +69,53 @@ export type TranscriptionError = {
   details?: string;
 };
 
+const SUPPORTED_AUDIO_FORMATS = [
+  "flac",
+  "m4a",
+  "mp3",
+  "mp4",
+  "mpeg",
+  "mpga",
+  "oga",
+  "ogg",
+  "wav",
+  "webm",
+] as const;
+
+type SupportedAudioFormat = (typeof SUPPORTED_AUDIO_FORMATS)[number];
+
+const MIME_TO_EXTENSION: Record<string, SupportedAudioFormat> = {
+  "application/ogg": "ogg",
+  "audio/flac": "flac",
+  "audio/m4a": "m4a",
+  "audio/mp3": "mp3",
+  "audio/mp4": "mp4",
+  "audio/mpeg": "mp3",
+  "audio/ogg": "ogg",
+  "audio/wav": "wav",
+  "audio/wave": "wav",
+  "audio/webm": "webm",
+  "audio/x-flac": "flac",
+  "audio/x-m4a": "m4a",
+  "audio/x-mp3": "mp3",
+  "audio/x-wav": "wav",
+  "audio/x-wave": "wav",
+  "video/mp4": "mp4",
+};
+
+const EXTENSION_TO_MIME: Record<SupportedAudioFormat, string> = {
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  mp3: "audio/mpeg",
+  mp4: "audio/mp4",
+  mpeg: "audio/mpeg",
+  mpga: "audio/mpeg",
+  oga: "audio/ogg",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+  webm: "audio/webm",
+};
+
 /**
  * Transcribe audio to text using the internal Speech-to-Text service
  *
@@ -129,11 +176,20 @@ export async function transcribeAudio(
     }
 
     // Step 3: Create FormData for multipart upload to Whisper API
+    const format = resolveUploadAudioFormat(options.audioUrl, mimeType);
+    if (!format) {
+      return {
+        error: "Invalid audio file format",
+        code: "INVALID_FORMAT",
+        details: `Unsupported audio type ${mimeType}. Supported formats: ${SUPPORTED_AUDIO_FORMATS.join(", ")}`,
+      };
+    }
+
     const formData = new FormData();
 
     // Create a Blob from the buffer and append to form
-    const filename = `audio.${getFileExtension(mimeType)}`;
-    const audioBlob = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });
+    const filename = `audio.${format.extension}`;
+    const audioBlob = new Blob([new Uint8Array(audioBuffer)], { type: format.mimeType });
     formData.append("file", audioBlob, filename);
 
     formData.append("model", "whisper-1");
@@ -193,22 +249,28 @@ export async function transcribeAudio(
   }
 }
 
-/**
- * Helper function to get file extension from MIME type
- */
-function getFileExtension(mimeType: string): string {
-  const mimeToExt: Record<string, string> = {
-    "audio/webm": "webm",
-    "audio/mp3": "mp3",
-    "audio/mpeg": "mp3",
-    "audio/wav": "wav",
-    "audio/wave": "wav",
-    "audio/ogg": "ogg",
-    "audio/m4a": "m4a",
-    "audio/mp4": "m4a",
-  };
+function resolveUploadAudioFormat(
+  audioUrl: string,
+  mimeType: string,
+): { extension: SupportedAudioFormat; mimeType: string } | null {
+  let urlExtension: string | undefined;
+  try {
+    const pathname = new URL(audioUrl).pathname;
+    urlExtension = pathname.split(".").pop()?.toLowerCase();
+  } catch {
+    // The download already succeeded; fall back to the response MIME type if the URL is unusual.
+  }
 
-  return mimeToExt[mimeType] || "audio";
+  if (urlExtension && SUPPORTED_AUDIO_FORMATS.includes(urlExtension as SupportedAudioFormat)) {
+    const extension = urlExtension as SupportedAudioFormat;
+    return { extension, mimeType: EXTENSION_TO_MIME[extension] };
+  }
+
+  const normalizedMimeType = mimeType.split(";", 1)[0]?.trim().toLowerCase();
+  const extension = MIME_TO_EXTENSION[normalizedMimeType];
+  if (!extension) return null;
+
+  return { extension, mimeType: EXTENSION_TO_MIME[extension] };
 }
 
 /**

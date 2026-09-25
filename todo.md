@@ -46,17 +46,8 @@
 
 - [x] Audit the repository for secrets, generated files, and unpublished credentials before external sharing
 - [x] Create continuation documentation for another AI agent, including architecture, current features, known limitations, and next tasks
-- [x] Publish the sanitized FlowType source to GitHub or provide an accessible repository alternative
-- [x] Verify the published handoff archive and deliver its access details; GitHub branch publication remained blocked by the connected integration
+- [ ] Publish the sanitized FlowType source to GitHub or provide an accessible repository alternative
+- [ ] Verify the published repository and deliver its access details
 
-- [x] Push sanitized FlowType source to `zavyle/Voice-Notes` branch `flowtype-handoff` without modifying `main` (blocked: GitHub integration returned 403; no repository content was changed)
-- [x] Verify GitHub branch publication was blocked with 403 and confirm `Voice-Notes/main` was not modified
-
-
-# GitHub Repository Publication
-
-- [x] Prepare and audit the sanitized FlowType ZIP for publication
-- [x] Create private GitHub repository `flowtype-mobile`
-- [x] Push the unpacked FlowType source to the new repository
-- [x] Verify repository contents, privacy, branch state, and handoff documentation
-- [x] Deliver the repository URL and continuation instructions
+- [ ] Push sanitized FlowType source to `zavyle/Voice-Notes` branch `flowtype-handoff` without modifying `main`
+- [ ] Verify the branch URL, latest commit, and handoff documentation on GitHub
