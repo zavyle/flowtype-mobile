@@ -9,10 +9,13 @@ describe("background recording policy", () => {
     expect(createRecordingAudioMode("android")).toEqual({
       allowsRecording: true,
       playsInSilentMode: true,
+      shouldPlayInBackground: true,
       allowsBackgroundRecording: true,
     });
     expect(createRecordingAudioMode("ios").allowsBackgroundRecording).toBe(true);
+    expect(createRecordingAudioMode("ios").shouldPlayInBackground).toBe(true);
     expect(createRecordingAudioMode("web").allowsBackgroundRecording).toBe(false);
+    expect(createRecordingAudioMode("web").shouldPlayInBackground).toBe(false);
   });
 
   it("handles an Android notification Stop action exactly once", () => {

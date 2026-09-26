@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   ScrollView,
   Text,
@@ -22,9 +22,11 @@ import {
   getSettings,
   TranscriptionSession,
 } from "@/lib/sessionStore";
-import { pickAudioRecording } from "@/lib/audioImport";
+import { importAudioFromUri, pickAudioRecording, type ImportedAudioFile } from "@/lib/audioImport";
+import { getIncomingShareSignature, selectIncomingAudioFile } from "@/lib/incomingShare";
 import * as Haptics from "expo-haptics";
 import { activateKeepAwake, deactivateKeepAwake } from "expo-keep-awake";
+import { useShareIntentContext } from "expo-share-intent";
 
 export default function DictationHomeScreen() {
   const [selectedStyle, setSelectedStyle] = useState<FormattingStyle>("clean_voice");
@@ -38,6 +40,8 @@ export default function DictationHomeScreen() {
   const [lastError, setLastError] = useState<string | null>(null);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
   const [customVocabTerms, setCustomVocabTerms] = useState<string[]>([]);
+  const sharedFileSignatureRef = useRef<string | null>(null);
+  const { hasShareIntent, shareIntent, resetShareIntent, error: shareIntentError } = useShareIntentContext();
 
   // Load vocabulary & settings on mount
   useEffect(() => {
@@ -129,67 +133,11 @@ export default function DictationHomeScreen() {
     transcribeMutation,
   ]);
 
-  const {
-    isRecording,
-    isPaused,
-    durationSeconds,
-    audioLevel,
-    startRecording,
-    pauseRecording,
-    resumeRecording,
-    stopRecording,
-    error: recordingError,
-    isStarting,
-    permissionStatus,
-    notificationPermissionStatus,
-  } = useAudioEngine({
-    chunkIntervalMinutes: 10,
-    onBackgroundStop: processCompletedRecording,
-  });
-
-  useEffect(() => {
-    if (Platform.OS === "web" || !isRecording || !keepScreenAwake) return;
-    void activateKeepAwake("flowtype-recording").catch(() => undefined);
-    return () => {
-      void deactivateKeepAwake("flowtype-recording").catch(() => undefined);
-    };
-  }, [isRecording, keepScreenAwake]);
-
-  const handleToggleRecord = async () => {
-    if (isRecording) {
-      try {
-        const recorded = await stopRecording();
-        if (!recorded.base64) {
-          throw new Error("No audio was captured. Check microphone access and try again.");
-        }
-        await processCompletedRecording({
-          base64: recorded.base64,
-          mimeType: recorded.mimeType,
-          duration: Math.max(1, recorded.duration || durationSeconds || 0),
-        });
-      } catch (err: any) {
-        console.error("Recording failed:", err);
-        setLastError(err?.message || "Recording or transcription failed. No session was saved.");
-      }
-    } else {
-      setCurrentSession(null);
-      setLastError(null);
-      const started = await startRecording();
-      if (!started.ok) setLastError(started.error);
-    }
-  };
-
-  const handleImportRecording = async () => {
-    if (isRecording || isProcessing || isImporting) return;
-    setLastError(null);
-    setCurrentSession(null);
+  const processImportedAudio = useCallback(async (imported: ImportedAudioFile, source: "picker" | "share") => {
     setIsImporting(true);
     setIsProcessing(true);
+    setStatusMessage(source === "share" ? `Receiving ${imported.name} from Android...` : `Importing ${imported.name}...`);
     try {
-      const imported = await pickAudioRecording();
-      if (!imported) return;
-
-      setStatusMessage(`Importing ${imported.name}...`);
       const res = await transcribeMutation.mutateAsync({
         audioBase64: imported.base64,
         mimeType: imported.mimeType,
@@ -234,7 +182,8 @@ export default function DictationHomeScreen() {
 
       await saveSession(importedSession);
       setCurrentSession(importedSession);
-      setStatusMessage(`Imported ${imported.name} successfully.`);
+      setStatusMessage(`${source === "share" ? "Shared" : "Imported"} ${imported.name} successfully.`);
+      setLastError(null);
     } catch (err) {
       console.error("Audio import failed:", err);
       setLastError(err instanceof Error ? err.message : "Could not import this recording.");
@@ -242,6 +191,113 @@ export default function DictationHomeScreen() {
       setIsImporting(false);
       setIsProcessing(false);
       setTimeout(() => setStatusMessage(null), 2200);
+    }
+  }, [customVocabTerms, selectedStyle, targetLanguage, transcribeMutation]);
+
+  const {
+    isRecording,
+    isPaused,
+    durationSeconds,
+    audioLevel,
+    startRecording,
+    pauseRecording,
+    resumeRecording,
+    stopRecording,
+    error: recordingError,
+    isStarting,
+    permissionStatus,
+    notificationPermissionStatus,
+  } = useAudioEngine({
+    chunkIntervalMinutes: 10,
+    onBackgroundStop: processCompletedRecording,
+  });
+
+  useEffect(() => {
+    if (!hasShareIntent || isRecording || isProcessing || isImporting) return;
+
+    const sharedAudio = selectIncomingAudioFile(shareIntent.files);
+    if (!sharedAudio?.path) {
+      if (shareIntent.files?.length) {
+        setLastError("FlowType received a shared file, but it is not a supported audio recording.");
+        resetShareIntent();
+      }
+      return;
+    }
+
+    const signature = getIncomingShareSignature(sharedAudio);
+    if (sharedFileSignatureRef.current === signature) return;
+    sharedFileSignatureRef.current = signature;
+
+    void (async () => {
+      setLastError(null);
+      setCurrentSession(null);
+      try {
+        const imported = await importAudioFromUri({
+          name: sharedAudio.fileName,
+          uri: sharedAudio.path!,
+          mimeType: sharedAudio.mimeType,
+          size: sharedAudio.size,
+        });
+        await processImportedAudio(imported, "share");
+      } catch (error) {
+        setLastError(error instanceof Error ? error.message : "Could not import the shared audio recording.");
+      } finally {
+        resetShareIntent();
+      }
+    })();
+  }, [
+    hasShareIntent,
+    isImporting,
+    isProcessing,
+    isRecording,
+    processImportedAudio,
+    resetShareIntent,
+    shareIntent.files,
+  ]);
+
+  useEffect(() => {
+    if (Platform.OS === "web" || !isRecording || !keepScreenAwake) return;
+    void activateKeepAwake("flowtype-recording").catch(() => undefined);
+    return () => {
+      void deactivateKeepAwake("flowtype-recording").catch(() => undefined);
+    };
+  }, [isRecording, keepScreenAwake]);
+
+  const handleToggleRecord = async () => {
+    if (isRecording) {
+      try {
+        const recorded = await stopRecording();
+        if (!recorded.base64) {
+          throw new Error("No audio was captured. Check microphone access and try again.");
+        }
+        await processCompletedRecording({
+          base64: recorded.base64,
+          mimeType: recorded.mimeType,
+          duration: Math.max(1, recorded.duration || durationSeconds || 0),
+        });
+      } catch (err: any) {
+        console.error("Recording failed:", err);
+        setLastError(err?.message || "Recording or transcription failed. No session was saved.");
+      }
+    } else {
+      setCurrentSession(null);
+      setLastError(null);
+      const started = await startRecording();
+      if (!started.ok) setLastError(started.error);
+    }
+  };
+
+  const handleImportRecording = async () => {
+    if (isRecording || isProcessing || isImporting) return;
+    setLastError(null);
+    setCurrentSession(null);
+    try {
+      const imported = await pickAudioRecording();
+      if (!imported) return;
+      await processImportedAudio(imported, "picker");
+    } catch (err) {
+      console.error("Audio import failed:", err);
+      setLastError(err instanceof Error ? err.message : "Could not import this recording.");
     }
   };
 
@@ -358,7 +414,7 @@ export default function DictationHomeScreen() {
             </Text>
           </TouchableOpacity>
           <Text style={styles.importHint}>
-            AIREC: transfer the WAV file to your phone, then import it here. Direct share-in is not enabled yet.
+            AIREC: transfer the WAV file to your phone, then choose Share → FlowType — or import it here.
           </Text>
         </View>
 
@@ -492,11 +548,11 @@ export default function DictationHomeScreen() {
           </View>
         )}
 
-        {(lastError || recordingError) && !isProcessing && !isRecording && (
+        {(lastError || recordingError || shareIntentError) && !isProcessing && !isRecording && (
           <View style={styles.errorCard}>
             <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#F87171" />
             <View style={styles.errorCardContent}>
-              <Text style={styles.errorCardText}>{lastError || recordingError}</Text>
+              <Text style={styles.errorCardText}>{lastError || recordingError || shareIntentError}</Text>
               <TouchableOpacity
                 style={styles.errorRetry}
                 onPress={() => {

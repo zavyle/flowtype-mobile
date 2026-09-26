@@ -1,6 +1,7 @@
 export type BackgroundRecordingPolicy = {
   allowsRecording: boolean;
   playsInSilentMode: boolean;
+  shouldPlayInBackground: boolean;
   allowsBackgroundRecording: boolean;
 };
 
@@ -13,6 +14,9 @@ export function createRecordingAudioMode(platform: string): BackgroundRecordingP
   return {
     allowsRecording: true,
     playsInSilentMode: true,
+    // Expo Audio's Android module uses this flag to decide whether to pause
+    // all recorders when the activity enters the background.
+    shouldPlayInBackground: platform !== "web",
     allowsBackgroundRecording: platform !== "web",
   };
 }

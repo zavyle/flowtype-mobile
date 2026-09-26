@@ -101,11 +101,22 @@ const config: ExpoConfig = {
         enableBackgroundRecording: true,
       },
     ],
+    "./plugins/withRecordingNotificationTimer",
     [
       "expo-notifications",
       {
         color: "#6366F1",
         defaultChannel: "flowtype-recording",
+      },
+    ],
+    [
+      "expo-share-intent",
+      {
+        // Android-only for this release: incoming audio is routed to Dictate
+        // and handled by the existing import/transcription flow.
+        disableIOS: true,
+        androidIntentFilters: ["audio/*", "application/octet-stream"],
+        androidMultiIntentFilters: ["audio/*", "application/octet-stream"],
       },
     ],
     [

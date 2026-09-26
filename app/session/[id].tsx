@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { StyleSelector } from "@/components/style-selector";
+import { SessionAudioPlayer } from "@/components/session-audio-player";
 import {
   TranscriptionSession,
   getSessionById,
@@ -124,6 +125,7 @@ export default function SessionDetailScreen() {
   }
 
   const isLong = session.isLongSession || session.duration >= 1800;
+  const playbackUrl = session.audioUrl || session.chunks.find((chunk) => chunk.audioUrl)?.audioUrl;
 
   return (
     <ScreenContainer className="p-4">
@@ -179,6 +181,8 @@ export default function SessionDetailScreen() {
             })}
           </Text>
         </View>
+
+        <SessionAudioPlayer audioUrl={playbackUrl} />
 
         {/* AI Style Switcher */}
         <View style={styles.styleSection}>
