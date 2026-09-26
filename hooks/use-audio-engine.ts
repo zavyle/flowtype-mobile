@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Platform, Alert } from "react-native";
 import * as Haptics from "expo-haptics";
+import * as Notifications from "expo-notifications";
 import {
   RecordingPresets,
   getRecordingPermissionsAsync,
@@ -8,8 +9,13 @@ import {
   setAudioModeAsync,
   useAudioRecorder,
   useAudioRecorderState,
+  type RecordingStatus,
 } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
+import {
+  createRecordingAudioMode,
+  shouldHandleBackgroundStop,
+} from "@/lib/backgroundRecording";
 
 export interface AudioEngineState {
   isRecording: boolean;
@@ -23,12 +29,70 @@ export interface AudioEngineState {
 export function useAudioEngine(options?: {
   chunkIntervalMinutes?: number;
   onChunkReady?: (chunkBlob: Blob | string, chunkIndex: number) => void;
+  onBackgroundStop?: (recording: {
+    base64: string;
+    duration: number;
+    mimeType: string;
+  }) => Promise<void> | void;
 }) {
   const chunkIntervalSec = (options?.chunkIntervalMinutes ?? 10) * 60;
+  const onBackgroundStopRef = useRef(options?.onBackgroundStop);
+  const isRecordingRef = useRef(false);
+  const isPausedRef = useRef(false);
+  const durationRef = useRef(0);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const stoppingFromInAppButtonRef = useRef(false);
+  const completionAlreadyHandledRef = useRef(false);
+  const recordingWasStartedRef = useRef(false);
+
+  const handleNativeRecordingStatus = useCallback(async (status: RecordingStatus) => {
+    if (Platform.OS === "web" || !status.isFinished || !status.url) return;
+
+    const shouldHandle = shouldHandleBackgroundStop({
+      appThinksRecording: isRecordingRef.current,
+      appThinksPaused: isPausedRef.current,
+      nativeRecorderIsRecording: false,
+      nativeRecorderUrl: status.url,
+      recordingWasStarted: recordingWasStartedRef.current,
+      stoppingFromInAppButton: stoppingFromInAppButtonRef.current,
+      completionAlreadyHandled: completionAlreadyHandledRef.current,
+    });
+    if (!shouldHandle) return;
+
+    completionAlreadyHandledRef.current = true;
+    setIsRecording(false);
+    setIsPaused(false);
+    setAudioLevel(0.08);
+
+    try {
+      const base64 = await FileSystem.readAsStringAsync(status.url, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      if (!base64) throw new Error("The background recording was empty.");
+
+      const duration = Math.max(
+        1,
+        Math.floor((Date.now() - (recordingStartedAtRef.current ?? Date.now())) / 1000),
+        durationRef.current,
+      );
+      durationRef.current = duration;
+      await onBackgroundStopRef.current?.({
+        base64: `data:audio/m4a;base64,${base64}`,
+        duration,
+        mimeType: "audio/m4a",
+      });
+    } catch (recordingError) {
+      const message =
+        recordingError instanceof Error
+          ? recordingError.message
+          : "The lock-screen Stop action could not save this recording.";
+      setError(message);
+    }
+  }, []);
   const nativeRecorder = useAudioRecorder({
     ...RecordingPresets.HIGH_QUALITY,
     isMeteringEnabled: true,
-  });
+  }, handleNativeRecordingStatus);
   const nativeRecorderState = useAudioRecorderState(nativeRecorder, 250);
 
   const [isRecording, setIsRecording] = useState(false);
@@ -38,6 +102,7 @@ export function useAudioEngine(options?: {
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [permissionStatus, setPermissionStatus] = useState<"unknown" | "granted" | "denied" | "undetermined">("unknown");
+  const [notificationPermissionStatus, setNotificationPermissionStatus] = useState<"unknown" | "granted" | "denied" | "undetermined">("unknown");
   const [isStarting, setIsStarting] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -47,6 +112,16 @@ export function useAudioEngine(options?: {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    onBackgroundStopRef.current = options?.onBackgroundStop;
+  }, [options?.onBackgroundStop]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+    isPausedRef.current = isPaused;
+    durationRef.current = durationSeconds;
+  }, [durationSeconds, isPaused, isRecording]);
 
   useEffect(() => {
     let mounted = true;
@@ -82,7 +157,10 @@ export function useAudioEngine(options?: {
     if (Platform.OS === "web" || !isRecording) return;
 
     const duration = Math.floor((nativeRecorderState.durationMillis || 0) / 1000);
-    if (duration > 0) setDurationSeconds(duration);
+    if (duration > 0) {
+      durationRef.current = duration;
+      setDurationSeconds(duration);
+    }
 
     const meter = nativeRecorderState.metering;
     if (typeof meter === "number") {
@@ -108,6 +186,29 @@ export function useAudioEngine(options?: {
     }
   }, []);
 
+  const requestRecordingNotificationPermission = useCallback(async () => {
+    if (Platform.OS !== "android") return;
+    try {
+      // Creating a channel before the Android 13 permission request makes the
+      // system prompt available. Expo Audio owns the actual recording channel.
+      await Notifications.setNotificationChannelAsync("flowtype-recording", {
+        name: "FlowType recording controls",
+        importance: Notifications.AndroidImportance.LOW,
+        vibrationPattern: [],
+        sound: null,
+      });
+      const current = await Notifications.getPermissionsAsync();
+      const next = current.granted ? current : await Notifications.requestPermissionsAsync();
+      setNotificationPermissionStatus(
+        next.granted ? "granted" : next.status === "denied" ? "denied" : "undetermined",
+      );
+    } catch {
+      // A foreground service can still keep capture alive. Do not block the
+      // recording just because the optional permission check failed.
+      setNotificationPermissionStatus("unknown");
+    }
+  }, []);
+
   const startRecording = useCallback(async (): Promise<{ ok: true } | { ok: false; error: string }> => {
     setError(null);
     setIsStarting(true);
@@ -130,14 +231,16 @@ export function useAudioEngine(options?: {
         return { ok: false, error: permissionMessage };
       }
 
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-      });
+      await setAudioModeAsync(createRecordingAudioMode(Platform.OS));
 
       if (Platform.OS !== "web") {
+        await requestRecordingNotificationPermission();
         await nativeRecorder.prepareToRecordAsync();
         nativeRecorder.record();
+        recordingStartedAtRef.current = Date.now();
+        recordingWasStartedRef.current = true;
+        stoppingFromInAppButtonRef.current = false;
+        completionAlreadyHandledRef.current = false;
         setIsRecording(true);
         setIsPaused(false);
         setAudioLevel(0.16);
@@ -209,7 +312,7 @@ export function useAudioEngine(options?: {
     } finally {
       setIsStarting(false);
     }
-  }, [nativeRecorder, showPermissionError]);
+  }, [nativeRecorder, requestRecordingNotificationPermission, showPermissionError]);
 
   const pauseRecording = useCallback(() => {
     if (!isRecording) return;
@@ -330,6 +433,7 @@ export function useAudioEngine(options?: {
     error,
     isStarting,
     permissionStatus,
+    notificationPermissionStatus,
     startRecording,
     pauseRecording,
     resumeRecording,

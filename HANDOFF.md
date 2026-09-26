@@ -2,7 +2,7 @@
 
 ## Current baseline
 
-The latest stable product checkpoint is the recorder-import milestone. The app is called FlowType and is a mobile Expo project with an Express/tRPC server. The latest implementation adds AIREC-compatible audio-file import for WAV, MP3, and M4A files, validates the selected file and rejects imports above 35 MB, converts the file to base64, calls `voice.transcribeAudioChunk`, formats the transcription using the selected style, and saves a real `TranscriptionSession` with one completed `AudioChunk`.
+The latest stable product checkpoint includes AIREC-compatible audio-file import and Android screen-off recording. The app is called FlowType and is a mobile Expo project with an Express/tRPC server. The import flow supports WAV, MP3, and M4A files, validates the selected file and rejects imports above 35 MB, converts the file to base64, calls `voice.transcribeAudioChunk`, formats the transcription using the selected style, and saves a real `TranscriptionSession` with one completed `AudioChunk`. Native Android recording uses Expo Audio's microphone foreground service: it stays active while the screen is locked and exposes a persistent system notification with a native **Stop** action.
 
 The current UI is intentionally honest about the integration boundary: users are told to transfer a file from AIREC to their phone and then import it. The app does not claim direct Bluetooth control or direct inbound Android share handling. This is because the public AIREC information confirms Bluetooth file transfer in the vendor app but does not expose the recorder’s BLE service UUIDs, characteristics, command protocol, SDK, or third-party API.
 
@@ -12,6 +12,7 @@ The current UI is intentionally honest about the integration boundary: users are
 |---|---|
 | `app/(tabs)/index.tsx` | Main Dictate UI, recording states, import action, transcription handoff, session creation |
 | `hooks/use-audio-engine.ts` | Native/web recording, microphone permissions, recorder lifecycle, metering, retry details |
+| `lib/backgroundRecording.ts` | Testable policy for foreground recording mode and notification Stop handling |
 | `lib/audioImport.ts` | Document picker, audio MIME inference, size validation, base64 conversion |
 | `lib/sessionStore.ts` | AsyncStorage session model and persistence; demo sessions are filtered out |
 | `server/voiceService.ts` | Upload to managed storage, Whisper transcription, AI formatting, response mapping |
@@ -23,7 +24,7 @@ The current UI is intentionally honest about the integration boundary: users are
 
 ## Safe continuation order
 
-First, install dependencies and run `pnpm check`, `pnpm lint`, and `pnpm test`. Then test the app on a physical Android device with a real AIREC-exported WAV file. Confirm that the file picker opens, the import enters a processing state, the server returns transcription, and History contains the imported session. If the import fails, inspect the server logs and payload size before changing the transcription service.
+First, install dependencies and run `pnpm check`, `pnpm lint`, and `pnpm test`. Then test the app on a physical Android device with a real AIREC-exported WAV file. Confirm that the file picker opens, the import enters a processing state, the server returns transcription, and History contains the imported session. Also start a live recording, lock the screen for at least 30 seconds, then use **Stop** in the persistent Android notification; on return to FlowType, confirm that the audio is transcribed and saved. Notification permission is required for the visible lock-screen Stop action on Android 13+.
 
 After physical-device validation, add an audio playback control to Session Detail for `session.audioUrl` and `chunk.audioUrl`. Next, implement Android share-target intake through a native config plugin or a compatible Expo module; do not describe `expo-sharing` alone as inbound share support because it only shares outward from the app. Finally, investigate direct BLE transfer with the physical recorder present and use a BLE inspection tool to discover services and characteristics. Treat any undocumented protocol as device-specific and avoid destructive firmware or pairing operations.
 

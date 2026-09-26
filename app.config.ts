@@ -52,8 +52,9 @@ const config: ExpoConfig = {
     supportsTablet: true,
     bundleIdentifier: env.iosBundleId,
     "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+      "ITSAppUsesNonExemptEncryption": false,
+      "UIBackgroundModes": ["audio"],
+    },
   },
   android: {
     adaptiveIcon: {
@@ -65,7 +66,12 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    permissions: ["POST_NOTIFICATIONS"],
+    permissions: [
+      "POST_NOTIFICATIONS",
+      "RECORD_AUDIO",
+      "FOREGROUND_SERVICE",
+      "FOREGROUND_SERVICE_MICROPHONE",
+    ],
     intentFilters: [
       {
         action: "VIEW",
@@ -91,6 +97,15 @@ const config: ExpoConfig = {
       "expo-audio",
       {
         microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
+        recordAudioAndroid: true,
+        enableBackgroundRecording: true,
+      },
+    ],
+    [
+      "expo-notifications",
+      {
+        color: "#6366F1",
+        defaultChannel: "flowtype-recording",
       },
     ],
     [

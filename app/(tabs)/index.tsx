@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   ScrollView,
   Text,
@@ -51,6 +51,84 @@ export default function DictationHomeScreen() {
     })();
   }, []);
 
+  // tRPC Mutations
+  const transcribeMutation = trpc.voice.transcribeAudioChunk.useMutation();
+  const reformatMutation = trpc.voice.reformatTranscript.useMutation();
+
+  const processCompletedRecording = useCallback(async (recorded: {
+    base64: string;
+    duration: number;
+    mimeType: string;
+  }) => {
+    setIsProcessing(true);
+    setStatusMessage("Finalizing audio & transcribing with Whisper...");
+    try {
+      if (!recorded.base64) {
+        throw new Error("No audio was captured. Check microphone access and try again.");
+      }
+
+      setStatusMessage("Analyzing speech & applying AI formatting...");
+      const res = await transcribeMutation.mutateAsync({
+        audioBase64: recorded.base64,
+        mimeType: recorded.mimeType,
+        language: targetLanguage,
+        style: selectedStyle,
+        customVocabulary: customVocabTerms,
+      });
+
+      if (!res.rawText.trim() || !res.formattedText.trim()) {
+        throw new Error("No speech was detected. Speak closer to the microphone and try again.");
+      }
+
+      const sessionDuration = Math.max(1, recorded.duration || 0);
+      const sessionId = `session_${Date.now()}`;
+      const newSession: TranscriptionSession = {
+        id: sessionId,
+        title:
+          res.rawText.slice(0, 48).trim() + (res.rawText.length > 48 ? "..." : "") ||
+          `Voice Dictation ${new Date().toLocaleTimeString()}`,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        duration: sessionDuration,
+        isLongSession: isLongSessionMode || sessionDuration > 1800,
+        chunks: [
+          {
+            id: `${sessionId}_chunk_0`,
+            chunkIndex: 0,
+            startTime: 0,
+            endTime: sessionDuration,
+            duration: sessionDuration,
+            rawText: res.rawText,
+            audioUrl: res.audioUrl,
+            status: "completed",
+          },
+        ],
+        rawText: res.rawText,
+        formattedText: res.formattedText,
+        style: selectedStyle,
+        language: targetLanguage,
+        audioUrl: res.audioUrl,
+        wordCount: res.formattedText.split(/\s+/).filter(Boolean).length,
+      };
+
+      await saveSession(newSession);
+      setCurrentSession(newSession);
+      setLastError(null);
+    } catch (err: any) {
+      console.error("Transcription failed:", err);
+      setLastError(err?.message || "Recording or transcription failed. No session was saved.");
+    } finally {
+      setIsProcessing(false);
+      setStatusMessage(null);
+    }
+  }, [
+    customVocabTerms,
+    isLongSessionMode,
+    selectedStyle,
+    targetLanguage,
+    transcribeMutation,
+  ]);
+
   const {
     isRecording,
     isPaused,
@@ -63,8 +141,10 @@ export default function DictationHomeScreen() {
     error: recordingError,
     isStarting,
     permissionStatus,
+    notificationPermissionStatus,
   } = useAudioEngine({
     chunkIntervalMinutes: 10,
+    onBackgroundStop: processCompletedRecording,
   });
 
   useEffect(() => {
@@ -75,84 +155,21 @@ export default function DictationHomeScreen() {
     };
   }, [isRecording, keepScreenAwake]);
 
-  // tRPC Mutations
-  const transcribeMutation = trpc.voice.transcribeAudioChunk.useMutation();
-  const reformatMutation = trpc.voice.reformatTranscript.useMutation();
-
   const handleToggleRecord = async () => {
     if (isRecording) {
-      // Stop recording and process
-      setIsProcessing(true);
-      setStatusMessage("Finalizing audio & transcribing with Whisper...");
       try {
         const recorded = await stopRecording();
         if (!recorded.base64) {
           throw new Error("No audio was captured. Check microphone access and try again.");
         }
-
-        let resultText = "";
-        let rawText = "";
-        let returnedAudioUrl: string | undefined = undefined;
-
-        if (recorded.base64) {
-          setStatusMessage("Analyzing speech & applying AI formatting...");
-          const res = await transcribeMutation.mutateAsync({
-            audioBase64: recorded.base64,
-            mimeType: recorded.mimeType,
-            language: targetLanguage,
-            style: selectedStyle,
-            customVocabulary: customVocabTerms,
-          });
-
-          rawText = res.rawText;
-          resultText = res.formattedText;
-          returnedAudioUrl = res.audioUrl;
-        }
-
-        if (!rawText.trim() || !resultText.trim()) {
-          throw new Error("No speech was detected. Speak closer to the microphone and try again.");
-        }
-
-        const sessionDuration = Math.max(1, recorded.duration || durationSeconds || 0);
-        const sessionId = `session_${Date.now()}`;
-        const newSession: TranscriptionSession = {
-          id: sessionId,
-          title:
-            rawText.slice(0, 48).trim() + (rawText.length > 48 ? "..." : "") ||
-            `Voice Dictation ${new Date().toLocaleTimeString()}`,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          duration: sessionDuration,
-          isLongSession: isLongSessionMode || sessionDuration > 1800,
-          chunks: [
-            {
-              id: `${sessionId}_chunk_0`,
-              chunkIndex: 0,
-              startTime: 0,
-              endTime: sessionDuration,
-              duration: sessionDuration,
-              rawText,
-              audioUrl: returnedAudioUrl,
-              status: "completed",
-            },
-          ],
-          rawText,
-          formattedText: resultText,
-          style: selectedStyle,
-          language: targetLanguage,
-          audioUrl: returnedAudioUrl,
-          wordCount: resultText.split(/\s+/).filter(Boolean).length,
-        };
-
-        await saveSession(newSession);
-        setCurrentSession(newSession);
-        setLastError(null);
+        await processCompletedRecording({
+          base64: recorded.base64,
+          mimeType: recorded.mimeType,
+          duration: Math.max(1, recorded.duration || durationSeconds || 0),
+        });
       } catch (err: any) {
-        console.error("Transcription failed:", err);
+        console.error("Recording failed:", err);
         setLastError(err?.message || "Recording or transcription failed. No session was saved.");
-      } finally {
-        setIsProcessing(false);
-        setStatusMessage(null);
       }
     } else {
       setCurrentSession(null);
@@ -413,6 +430,26 @@ export default function DictationHomeScreen() {
               accentColor={isLongSessionMode ? "#8B5CF6" : "#6366F1"}
             />
           </View>
+
+          {Platform.OS === "android" && isRecording && (
+            <View
+              style={[
+                styles.backgroundRecordingBanner,
+                notificationPermissionStatus === "denied" && styles.backgroundRecordingBannerWarning,
+              ]}
+            >
+              <IconSymbol
+                name={notificationPermissionStatus === "denied" ? "exclamationmark.triangle.fill" : "lock.fill"}
+                size={14}
+                color={notificationPermissionStatus === "denied" ? "#FCD34D" : "#A5B4FC"}
+              />
+              <Text style={styles.backgroundRecordingText}>
+                {notificationPermissionStatus === "denied"
+                  ? "Recording continues with the screen off, but notification access is blocked. Enable FlowType notifications to get the lock-screen Stop button."
+                  : "Screen-off recording is active. Use Stop in the persistent FlowType notification to finish."}
+              </Text>
+            </View>
+          )}
 
           {/* 30m+ Long Session Hint / Info */}
           {isLongSessionMode && (
@@ -734,6 +771,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginVertical: 4,
+  },
+  backgroundRecordingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(99, 102, 241, 0.12)",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    gap: 8,
+    marginTop: 8,
+  },
+  backgroundRecordingBannerWarning: {
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+  },
+  backgroundRecordingText: {
+    color: "#C7D2FE",
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 15,
   },
   longSessionBanner: {
     flexDirection: "row",
