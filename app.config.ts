@@ -44,7 +44,7 @@ const env = {
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.0.3",
+  version: "1.0.5",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
@@ -68,7 +68,7 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    versionCode: 6,
+    versionCode: 8,
     permissions: [
       "POST_NOTIFICATIONS",
       "RECORD_AUDIO",

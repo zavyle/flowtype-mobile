@@ -14,12 +14,14 @@ import {
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { AirecBleClient, type AirecScanResult } from "@/lib/airecBle";
+import { formatAirecFileSize, type AirecFileListResult } from "@/lib/airecFileTransfer";
 import {
   formatRssi,
   getAirecDeviceLabel,
   getProfileSummary,
   isLikelyAirecRecorder,
   type AirecConnectionProfile,
+  type AirecTransferHint,
 } from "@/lib/airecBleUtils";
 
 function describeError(error: unknown): string {
@@ -37,6 +39,10 @@ export default function DevicesScreen() {
   const [isScanning, setIsScanning] = useState(false);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [profile, setProfile] = useState<AirecConnectionProfile | null>(null);
+  const [transferHint, setTransferHint] = useState<AirecTransferHint | null>(null);
+  const [isInspectingTransfer, setIsInspectingTransfer] = useState(false);
+  const [fileListResult, setFileListResult] = useState<AirecFileListResult | null>(null);
+  const [isListingFiles, setIsListingFiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [disconnectMessage, setDisconnectMessage] = useState<string | null>(null);
 
@@ -50,6 +56,8 @@ export default function DevicesScreen() {
     setDisconnectMessage(null);
     setDevices([]);
     setProfile(null);
+    setTransferHint(null);
+    setFileListResult(null);
     disconnectSubscriptionRef.current?.remove();
     disconnectSubscriptionRef.current = null;
 
@@ -81,9 +89,13 @@ export default function DevicesScreen() {
     try {
       const connectedProfile = await clientRef.current.connect(device.id);
       setProfile(connectedProfile);
+      setTransferHint(null);
+      setFileListResult(null);
       disconnectSubscriptionRef.current?.remove();
       disconnectSubscriptionRef.current = clientRef.current.watchDisconnection(device.id, (message) => {
         setProfile(null);
+        setTransferHint(null);
+        setFileListResult(null);
         setDisconnectMessage(
           message
             ? `Recorder disconnected: ${message}`
@@ -98,6 +110,34 @@ export default function DevicesScreen() {
     }
   }, []);
 
+  const inspectTransferProfile = useCallback(async () => {
+    if (!profile) return;
+    setError(null);
+    setIsInspectingTransfer(true);
+    try {
+      const hint = await clientRef.current.inspectTransferProfile(profile.deviceId);
+      setTransferHint(hint);
+    } catch (inspectionError) {
+      setError(describeError(inspectionError));
+    } finally {
+      setIsInspectingTransfer(false);
+    }
+  }, [profile]);
+
+  const listRecorderFiles = useCallback(async () => {
+    if (!profile) return;
+    setError(null);
+    setIsListingFiles(true);
+    try {
+      const result = await clientRef.current.listRecorderFiles(profile.deviceId, profile);
+      setFileListResult(result);
+    } catch (listingError) {
+      setError(describeError(listingError));
+    } finally {
+      setIsListingFiles(false);
+    }
+  }, [profile]);
+
   const disconnect = useCallback(async () => {
     if (!profile) return;
     try {
@@ -105,6 +145,8 @@ export default function DevicesScreen() {
       disconnectSubscriptionRef.current?.remove();
       disconnectSubscriptionRef.current = null;
       setProfile(null);
+      setTransferHint(null);
+      setFileListResult(null);
       setDisconnectMessage("Recorder disconnected.");
     } catch (disconnectError) {
       setError(describeError(disconnectError));
@@ -119,9 +161,9 @@ export default function DevicesScreen() {
 
     await Share.share({
       title: "FlowType AIREC connection diagnostic",
-      message: `FlowType connected to ${profile.deviceName}\n${getProfileSummary(profile)}\n\n${details}`,
+      message: `FlowType connected to ${profile.deviceName}\n${getProfileSummary(profile)}\nRead-only transfer inspection: ${transferHint ? `${transferHint.readableValueCount}/${transferHint.readableCharacteristicCount} readable characteristics returned printable data; hotspot ${transferHint.advertisedSsid ? "identifier detected" : "identifier not exposed"}.` : "not run"}\n\n${details}`,
     });
-  }, [profile]);
+  }, [profile, transferHint]);
 
   useEffect(() => {
     const client = clientRef.current;
@@ -158,8 +200,71 @@ export default function DevicesScreen() {
                 </View>
                 <Text style={styles.connectedMeta}>{getProfileSummary(profile)}</Text>
                 <Text style={styles.safetyText}>
-                  Connection is read-only for now. AIREC’s official app switches to a device-specific Wi-Fi/TCP file-transfer channel after Bluetooth pairing; FlowType will not send undocumented commands that could risk recordings.
+                  Check whether this recorder exposes a Quick Transfer Wi-Fi profile through a readable characteristic. FlowType does not write, subscribe, or send undocumented commands.
                 </Text>
+                <View style={styles.fileListSection}>
+                  <Text style={styles.fileListIntro}>
+                    Recording list uses AIREC’s verified Bluetooth getFiles command only. It does not start Wi-Fi, download audio, delete recordings, or change the recorder.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.fileListButton, isListingFiles && styles.inspectButtonDisabled]}
+                    onPress={() => void listRecorderFiles()}
+                    disabled={isListingFiles}
+                    activeOpacity={0.82}
+                  >
+                    {isListingFiles ? <ActivityIndicator color="#DCFCE7" /> : <IconSymbol name="folder.fill" size={16} color="#DCFCE7" />}
+                    <Text style={styles.fileListButtonText}>
+                      {isListingFiles ? "Reading recorder list…" : "List recordings on AIREC"}
+                    </Text>
+                  </TouchableOpacity>
+                  {fileListResult ? (
+                    <View style={styles.fileListResult}>
+                      <Text style={styles.transferResultTitle}>
+                        {fileListResult.files.length} recording{fileListResult.files.length === 1 ? "" : "s"} found
+                      </Text>
+                      <Text style={styles.transferResultText}>
+                        Verified {fileListResult.protocol} AIREC Bluetooth response. Files remain safely on the recorder.
+                      </Text>
+                      {fileListResult.files.slice(0, 12).map((file) => (
+                        <View key={`${file.name}-${file.sizeBytes}`} style={styles.fileRow}>
+                          <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
+                          <Text style={styles.fileSize}>{formatAirecFileSize(file.sizeBytes)}</Text>
+                        </View>
+                      ))}
+                      {fileListResult.files.length > 12 ? (
+                        <Text style={styles.moreFilesText}>Showing the first 12 of {fileListResult.files.length} recordings.</Text>
+                      ) : null}
+                      <Text style={styles.transferNextStep}>
+                        Audio download needs the recorder’s Wi-Fi/TCP session. This screen first proves the exact file list without risking the 64 GB archive; the next build will add download only after this list is confirmed on your recorder.
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <TouchableOpacity
+                  style={[styles.inspectButton, isInspectingTransfer && styles.inspectButtonDisabled]}
+                  onPress={() => void inspectTransferProfile()}
+                  disabled={isInspectingTransfer}
+                  activeOpacity={0.82}
+                >
+                  {isInspectingTransfer ? <ActivityIndicator color="#DBEAFE" /> : <IconSymbol name="magnifyingglass" size={16} color="#DBEAFE" />}
+                  <Text style={styles.inspectButtonText}>{isInspectingTransfer ? "Inspecting transfer profile…" : "Inspect Quick Transfer profile"}</Text>
+                </TouchableOpacity>
+                {transferHint ? (
+                  <View style={styles.transferResult}>
+                    {transferHint.advertisedSsid ? (
+                      <>
+                        <Text style={styles.transferResultTitle}>Recorder hotspot advertised</Text>
+                        <Text style={styles.transferResultText}>Network: {transferHint.advertisedSsid} • Security: {transferHint.security ?? "unknown"}</Text>
+                        <Text style={styles.transferResultText}>This identifies the recorder network without opening it or requesting files. The next transfer step still needs a verified vendor file-list command.</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.transferResultTitle}>No Quick Transfer hotspot was exposed</Text>
+                        <Text style={styles.transferResultText}>{transferHint.readableValueCount} of {transferHint.readableCharacteristicCount} readable characteristics returned printable data. The recorder needs its vendor pairing command before it will advertise a hotspot.</Text>
+                      </>
+                    )}
+                  </View>
+                ) : null}
                 <View style={styles.connectedActions}>
                   <TouchableOpacity style={styles.secondaryButton} onPress={shareDiagnostics} activeOpacity={0.82}>
                     <Text style={styles.secondaryButtonText}>Share diagnostic</Text>
@@ -221,7 +326,7 @@ export default function DevicesScreen() {
         ListFooterComponent={
           <View style={styles.footer}>
             <Text style={styles.footerTitle}>What this does</Text>
-            <Text style={styles.footerText}>• Requests standard Android Bluetooth permissions only when you scan.{"\n"}• Connects and discovers the recorder’s exposed services without writing to it.{"\n"}• Keeps your existing WAV import flow unchanged while device transfer is validated.</Text>
+            <Text style={styles.footerText}>• Requests standard Android Bluetooth permissions only when you scan.{"\n"}• Connects and discovers the recorder’s exposed services before a file-list request.{"\n"}• Keeps your existing WAV import flow unchanged while download transfer is validated.</Text>
             {Platform.OS === "web" ? <Text style={styles.webNote}>Use the installed Android/iOS app to scan and connect Bluetooth recorders.</Text> : null}
             <TouchableOpacity style={styles.backLink} onPress={() => router.back()} activeOpacity={0.7}>
               <Text style={styles.backLinkText}>Back to Dictate</Text>
@@ -262,6 +367,22 @@ const styles = StyleSheet.create({
   connectedTitle: { color: "#DCFCE7", fontSize: 15, fontWeight: "800", flex: 1 },
   connectedMeta: { color: "#86EFAC", fontSize: 12, fontWeight: "600" },
   safetyText: { color: "#A7F3D0", fontSize: 12, lineHeight: 18 },
+  fileListSection: { gap: 8, marginTop: 2 },
+  fileListIntro: { color: "#BBF7D0", fontSize: 12, lineHeight: 17 },
+  fileListButton: { backgroundColor: "#155E75", minHeight: 42, borderRadius: 11, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  fileListButtonText: { color: "#DCFCE7", fontSize: 12, fontWeight: "800" },
+  fileListResult: { backgroundColor: "rgba(6,78,59,0.30)", borderColor: "rgba(52,211,153,0.34)", borderWidth: 1, borderRadius: 11, padding: 11, gap: 7 },
+  fileRow: { backgroundColor: "rgba(15,23,42,0.52)", borderRadius: 8, paddingHorizontal: 9, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 8 },
+  fileName: { color: "#ECFDF5", fontSize: 12, fontWeight: "600", flex: 1 },
+  fileSize: { color: "#A7F3D0", fontSize: 11, fontWeight: "700" },
+  moreFilesText: { color: "#86EFAC", fontSize: 11, lineHeight: 16 },
+  transferNextStep: { color: "#BBF7D0", fontSize: 11, lineHeight: 16, marginTop: 1 },
+  inspectButton: { backgroundColor: "#213C68", minHeight: 42, borderRadius: 11, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  inspectButtonDisabled: { opacity: 0.72 },
+  inspectButtonText: { color: "#DBEAFE", fontSize: 12, fontWeight: "800" },
+  transferResult: { backgroundColor: "rgba(30,58,138,0.24)", borderColor: "rgba(96,165,250,0.34)", borderWidth: 1, borderRadius: 11, padding: 11, gap: 4 },
+  transferResultTitle: { color: "#DBEAFE", fontSize: 12, fontWeight: "800" },
+  transferResultText: { color: "#BFDBFE", fontSize: 12, lineHeight: 17 },
   connectedActions: { flexDirection: "row", gap: 8, marginTop: 3 },
   secondaryButton: { backgroundColor: "rgba(167,243,208,0.12)", paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10 },
   secondaryButtonText: { color: "#A7F3D0", fontWeight: "700", fontSize: 12 },

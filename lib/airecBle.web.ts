@@ -1,6 +1,8 @@
+import type { AirecFileListResult } from "./airecFileTransfer";
 import type {
   AirecConnectionProfile,
   AirecDeviceSummary,
+  AirecTransferHint,
 } from "./airecBleUtils";
 
 export type AirecScanResult = AirecDeviceSummary;
@@ -15,6 +17,17 @@ export class AirecBleClient {
   async stopScan(): Promise<void> {}
 
   async connect(_deviceId: string): Promise<AirecConnectionProfile> {
+    throw new Error(WEB_MESSAGE);
+  }
+
+  async inspectTransferProfile(_deviceId: string): Promise<AirecTransferHint> {
+    throw new Error(WEB_MESSAGE);
+  }
+
+  async listRecorderFiles(
+    _deviceId: string,
+    _profile: AirecConnectionProfile,
+  ): Promise<AirecFileListResult> {
     throw new Error(WEB_MESSAGE);
   }
 
