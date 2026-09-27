@@ -41,6 +41,7 @@ const MAPPING = {
   "info.circle": "info",
   "lock.fill": "lock",
   "lock.open.fill": "lock-open",
+  "archivebox.fill": "inventory-2",
 } as IconMapping;
 
 /**

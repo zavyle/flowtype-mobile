@@ -41,6 +41,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="recovery"
+        options={{
+          title: "Vault",
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="archivebox.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="vocabulary"
         options={{
           title: "Vocabulary",

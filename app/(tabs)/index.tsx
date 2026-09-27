@@ -27,16 +27,20 @@ import { getIncomingShareSignature, selectIncomingAudioFile } from "@/lib/incomi
 import {
   clearPendingRecording,
   getPendingRecording,
-  markPendingRecordingAttempt,
   persistPendingRecording,
+  updatePendingRecording,
   type PendingRecording,
 } from "@/lib/pendingRecording";
 import { uploadNativeAudioForTranscription } from "@/lib/nativeAudioUpload";
+import { getUploadProgress } from "@/lib/resumableUpload";
+import { createTranscriptionSession } from "@/lib/transcriptionSession";
 import * as Haptics from "expo-haptics";
 import { activateKeepAwake, deactivateKeepAwake } from "expo-keep-awake";
 import { useShareIntentContext } from "expo-share-intent";
+import { useRouter } from "expo-router";
 
 export default function DictationHomeScreen() {
+  const router = useRouter();
   const [selectedStyle, setSelectedStyle] = useState<FormattingStyle>("clean_voice");
   const [isLongSessionMode, setIsLongSessionMode] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState("auto");
@@ -110,6 +114,20 @@ export default function DictationHomeScreen() {
             language: savedRecording.language,
             style: savedRecording.style,
             customVocabulary: savedRecording.customVocabulary,
+            resumableCheckpoint: savedRecording.upload,
+            onUploadCheckpoint: async (upload) => {
+              const updated = await updatePendingRecording(savedRecording!.id, { upload, lastError: undefined });
+              if (updated) {
+                savedRecording = updated;
+                setPendingRecording(updated);
+              }
+              const percent = Math.round(getUploadProgress(upload) * 100);
+              setStatusMessage(
+                upload.status === "assembling"
+                  ? "Verifying uploaded audio & transcribing..."
+                  : `Protecting long recording upload • ${percent}% complete`,
+              );
+            },
           })
         : await transcribeMutation.mutateAsync({
             audioBase64: recorded.base64!,
@@ -124,35 +142,15 @@ export default function DictationHomeScreen() {
       }
 
       const sessionDuration = Math.max(1, recorded.duration || 0);
-      const sessionId = `session_${Date.now()}`;
-      const newSession: TranscriptionSession = {
-        id: sessionId,
-        title:
-          res.rawText.slice(0, 48).trim() + (res.rawText.length > 48 ? "..." : "") ||
-          `Voice Dictation ${new Date().toLocaleTimeString()}`,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+      const newSession = createTranscriptionSession({
+        response: res,
         duration: sessionDuration,
-        isLongSession: isLongSessionMode || sessionDuration > 1800,
-        chunks: [
-          {
-            id: `${sessionId}_chunk_0`,
-            chunkIndex: 0,
-            startTime: 0,
-            endTime: sessionDuration,
-            duration: sessionDuration,
-            rawText: res.rawText,
-            audioUrl: res.audioUrl,
-            status: "completed",
-          },
-        ],
-        rawText: res.rawText,
-        formattedText: res.formattedText,
         style: selectedStyle,
         language: targetLanguage,
-        audioUrl: res.audioUrl,
-        wordCount: res.formattedText.split(/\s+/).filter(Boolean).length,
-      };
+        name: savedRecording?.name || `Voice Dictation ${new Date().toLocaleTimeString()}`,
+        source: "live",
+        isLongSession: isLongSessionMode,
+      });
 
       await saveSession(newSession);
       setCurrentSession(newSession);
@@ -164,6 +162,10 @@ export default function DictationHomeScreen() {
     } catch (err: any) {
       console.error("Transcription failed:", err);
       const message = err?.message || "Recording or transcription failed.";
+      if (savedRecording) {
+        const updated = await updatePendingRecording(savedRecording.id, { lastError: message });
+        if (updated) setPendingRecording(updated);
+      }
       setLastError(
         savedRecording || pendingRecording
           ? `${message} Your completed audio is saved safely on this device. Tap Retry transcription to send that same recording again.`
@@ -182,126 +184,89 @@ export default function DictationHomeScreen() {
     transcribeMutation,
   ]);
 
-  const retryPendingTranscription = useCallback(async () => {
-    const saved = await getPendingRecording();
-    if (!saved) {
-      setPendingRecording(null);
-      setLastError("The recoverable recording is no longer available on this device.");
-      return;
-    }
-
-    setIsProcessing(true);
-    setLastError(null);
-    setStatusMessage(`Retrying transcription for the saved ${formatTimeClock(saved.duration)} recording...`);
-    try {
-      await markPendingRecordingAttempt(saved.id);
-      const res = await uploadNativeAudioForTranscription({
-        fileUri: saved.fileUri,
-        mimeType: saved.mimeType,
-        language: saved.language,
-        style: saved.style,
-        customVocabulary: saved.customVocabulary,
-      });
-
-      if (!res.rawText.trim() || !res.formattedText.trim()) {
-        throw new Error("No speech was detected in the saved recording.");
-      }
-
-      const sessionId = `session_${Date.now()}`;
-      const sessionDuration = Math.max(1, saved.duration || res.duration || 0);
-      const newSession: TranscriptionSession = {
-        id: sessionId,
-        title:
-          res.rawText.slice(0, 48).trim() + (res.rawText.length > 48 ? "..." : "") || saved.name,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        duration: sessionDuration,
-        isLongSession: sessionDuration > 1800,
-        chunks: [{
-          id: `${sessionId}_chunk_0`,
-          chunkIndex: 0,
-          startTime: 0,
-          endTime: sessionDuration,
-          duration: sessionDuration,
-          rawText: res.rawText,
-          audioUrl: res.audioUrl,
-          status: "completed",
-        }],
-        rawText: res.rawText,
-        formattedText: res.formattedText,
-        style: saved.style,
-        language: saved.language,
-        audioUrl: res.audioUrl,
-        wordCount: res.formattedText.split(/\s+/).filter(Boolean).length,
-      };
-      await saveSession(newSession);
-      await clearPendingRecording(saved.id);
-      setPendingRecording(null);
-      setCurrentSession(newSession);
-      setLastError(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Transcription retry failed.";
-      setLastError(`${message} The original recording is still saved safely. Retry again when your connection is ready.`);
-    } finally {
-      setIsProcessing(false);
-      setStatusMessage(null);
-    }
-  }, []);
-
   const processImportedAudio = useCallback(async (imported: ImportedAudioFile, source: "picker" | "share") => {
     setIsImporting(true);
     setIsProcessing(true);
     setStatusMessage(source === "share" ? `Receiving ${imported.name} from Android...` : `Importing ${imported.name}...`);
+    let savedImport: PendingRecording | null = null;
     try {
-      const res = await transcribeMutation.mutateAsync({
-        audioBase64: imported.base64,
-        mimeType: imported.mimeType,
-        language: targetLanguage,
-        style: selectedStyle,
-        customVocabulary: customVocabTerms,
-      });
+      if (Platform.OS !== "web" && imported.uri) {
+        setStatusMessage("Saving a protected Recovery Vault copy before transcription...");
+        savedImport = await persistPendingRecording({
+          sourceUri: imported.uri,
+          mimeType: imported.mimeType,
+          duration: 0,
+          source: "import",
+          name: imported.name,
+          language: targetLanguage,
+          style: selectedStyle,
+          customVocabulary: customVocabTerms,
+        });
+        setPendingRecording(savedImport);
+      }
+
+      const res = savedImport
+        ? await uploadNativeAudioForTranscription({
+            fileUri: savedImport.fileUri,
+            mimeType: savedImport.mimeType,
+            language: savedImport.language,
+            style: savedImport.style,
+            customVocabulary: savedImport.customVocabulary,
+            resumableCheckpoint: savedImport.upload,
+            onUploadCheckpoint: async (upload) => {
+              const updated = await updatePendingRecording(savedImport!.id, { upload, lastError: undefined });
+              if (updated) {
+                savedImport = updated;
+                setPendingRecording(updated);
+              }
+              const percent = Math.round(getUploadProgress(upload) * 100);
+              setStatusMessage(
+                upload.status === "assembling"
+                  ? "Verifying imported audio & transcribing..."
+                  : `Protecting imported upload • ${percent}% complete`,
+              );
+            },
+          })
+        : await transcribeMutation.mutateAsync({
+            audioBase64: imported.base64!,
+            mimeType: imported.mimeType,
+            language: targetLanguage,
+            style: selectedStyle,
+            customVocabulary: customVocabTerms,
+          });
 
       if (!res.rawText.trim() || !res.formattedText.trim()) {
         throw new Error("No speech was detected in this recording. Try a clearer export from the recorder.");
       }
 
       const sessionDuration = Math.max(1, res.duration || 0);
-      const sessionId = `import_${Date.now()}`;
-      const importedSession: TranscriptionSession = {
-        id: sessionId,
-        title:
-          res.rawText.slice(0, 48).trim() + (res.rawText.length > 48 ? "..." : "") || imported.name,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+      const importedSession = createTranscriptionSession({
+        response: res,
         duration: sessionDuration,
-        isLongSession: sessionDuration >= 1800,
-        chunks: [
-          {
-            id: `${sessionId}_chunk_0`,
-            chunkIndex: 0,
-            startTime: 0,
-            endTime: sessionDuration,
-            duration: sessionDuration,
-            rawText: res.rawText,
-            audioUrl: res.audioUrl,
-            status: "completed",
-          },
-        ],
-        rawText: res.rawText,
-        formattedText: res.formattedText,
         style: selectedStyle,
         language: targetLanguage,
-        audioUrl: res.audioUrl,
-        wordCount: res.formattedText.split(/\s+/).filter(Boolean).length,
-      };
+        name: imported.name,
+        source: "import",
+      });
 
       await saveSession(importedSession);
+      if (savedImport) {
+        await clearPendingRecording(savedImport.id);
+        setPendingRecording(null);
+      }
       setCurrentSession(importedSession);
       setStatusMessage(`${source === "share" ? "Shared" : "Imported"} ${imported.name} successfully.`);
       setLastError(null);
     } catch (err) {
       console.error("Audio import failed:", err);
-      setLastError(err instanceof Error ? err.message : "Could not import this recording.");
+      const message = err instanceof Error ? err.message : "Could not import this recording.";
+      if (savedImport) {
+        const updated = await updatePendingRecording(savedImport.id, { lastError: message });
+        if (updated) setPendingRecording(updated);
+        setLastError(`${message} This imported audio is safely saved in Recovery Vault.`);
+      } else {
+        setLastError(message);
+      }
     } finally {
       setIsImporting(false);
       setIsProcessing(false);
@@ -674,7 +639,7 @@ export default function DictationHomeScreen() {
                 onPress={() => {
                   setLastError(null);
                   if (pendingRecording) {
-                    void retryPendingTranscription();
+                    router.push("/recovery");
                   } else {
                     void handleToggleRecord();
                   }
@@ -682,42 +647,8 @@ export default function DictationHomeScreen() {
                 activeOpacity={0.8}
               >
                 <Text style={styles.errorRetryText}>
-                  {pendingRecording ? "Retry transcription" : "Try again"}
+                  {pendingRecording ? "Open Recovery Vault" : "Try again"}
                 </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* Separate Recovery Card for saved recording so primary Dictate button remains untouched */}
-        {pendingRecording && !isRecording && !isProcessing && (
-          <View style={styles.recoveryCard}>
-            <View style={styles.recoveryCardHeader}>
-              <IconSymbol name="waveform" size={18} color="#818CF8" />
-              <Text style={styles.recoveryCardTitle}>Saved Recording Available</Text>
-            </View>
-            <Text style={styles.recoveryCardDescription}>
-              FlowType preserved your completed {formatTimeClock(pendingRecording.duration)} recording on this device.
-            </Text>
-            <View style={styles.recoveryCardActions}>
-              <TouchableOpacity
-                style={styles.recoveryRetryBtn}
-                onPress={() => void retryPendingTranscription()}
-                activeOpacity={0.8}
-              >
-                <IconSymbol name="arrow.clockwise" size={14} color="#FFFFFF" />
-                <Text style={styles.recoveryRetryText}>Retry Transcription</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.recoveryDiscardBtn}
-                onPress={async () => {
-                  await clearPendingRecording(pendingRecording.id);
-                  setPendingRecording(null);
-                  setLastError(null);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.recoveryDiscardText}>Dismiss</Text>
               </TouchableOpacity>
             </View>
           </View>

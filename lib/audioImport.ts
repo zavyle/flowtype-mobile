@@ -10,14 +10,17 @@ import {
   MIME_ALIASES,
 } from "./audioFormat";
 
-const MAX_IMPORT_BYTES = 35 * 1024 * 1024;
+// Native imports travel through the resumable binary uploader, so they no
+// longer need to be expanded into memory as base64. Keep a bounded but useful
+// cap for several-hour speech recordings at the 32 kbps capture profile.
+const MAX_IMPORT_BYTES = 180 * 1024 * 1024;
 
 export interface ImportedAudioFile {
   name: string;
   uri: string;
   mimeType: string;
   size?: number;
-  base64: string;
+  base64?: string;
 }
 
 export interface AudioImportSource {
@@ -49,7 +52,7 @@ export async function importAudioFromUri(source: AudioImportSource): Promise<Imp
 
   if (source.size && source.size > MAX_IMPORT_BYTES) {
     throw new Error(
-      "This recording is larger than 35 MB. Export a shorter clip or a compressed M4A/MP3 file for this first import flow.",
+      "This recording is larger than FlowType's current 180 MB safe import limit. Export a shorter clip or a compressed M4A/MP3 file.",
     );
   }
 
@@ -61,11 +64,15 @@ export async function importAudioFromUri(source: AudioImportSource): Promise<Imp
     );
   }
 
-  const base64 = source.base64 || await FileSystem.readAsStringAsync(source.uri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  const base64 = source.base64 || (Platform.OS === "web"
+    ? await FileSystem.readAsStringAsync(source.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      })
+    : undefined);
 
-  if (!base64) throw new Error("FlowType could not read the selected audio file.");
+  if (Platform.OS === "web" && !base64) {
+    throw new Error("FlowType could not read the selected audio file.");
+  }
 
   return {
     name,
@@ -81,7 +88,7 @@ export async function pickAudioRecording(): Promise<ImportedAudioFile | null> {
     type: ["audio/*", "application/octet-stream"],
     copyToCacheDirectory: true,
     multiple: false,
-    base64: true,
+    base64: Platform.OS === "web",
   });
 
   if (result.canceled) return null;

@@ -4,7 +4,7 @@ FlowType is an Expo SDK 54 mobile voice-dictation workspace inspired by Wispr Fl
 
 ## Current capabilities
 
-The current stable build includes native and web microphone permission handling, real `expo-audio` recording, animated waveform feedback, retryable recording/transcription errors, **Android foreground-service recording that survives a screen lock with a live elapsed notification timer and Stop action**, extended-session settings, Keep Awake during active recording, custom vocabulary, six formatting styles, searchable History, session details with audio playback, and recorder-file import for WAV, MP3, and M4A files. On Android, a finished dictation is first copied to protected local recovery storage and uploaded as binary audio rather than an expanded base64 JSON payload; a failed transcription therefore leaves the exact recording intact and turns **Retry transcription** into a real resend.
+The current stable build includes native and web microphone permission handling, real `expo-audio` recording, animated waveform feedback, retryable recording/transcription errors, **Android foreground-service recording that survives a screen lock with a live elapsed notification timer and Stop action**, extended-session settings, Keep Awake during active recording, custom vocabulary, six formatting styles, searchable History, session details with audio playback, and recorder-file import for WAV, MP3, and M4A files. On Android, every finished dictation or imported recorder file is copied into **Recovery Vault** before transcription. Smaller files retain the proven binary-upload path; larger files upload in durable 6 MB chunks, with a checkpoint after each successful chunk. A network loss or app restart can therefore resume at the first missing chunk instead of deleting or retransmitting the whole recording.
 
 The recorder-import path is designed for AIREC-compatible hardware workflows. Transfer the recorder’s exported file to the phone, then either open FlowType and tap **Import Recorder Audio** or choose **Share → FlowType** from Android’s Files app. Direct Bluetooth control is not implemented because the recorder’s proprietary BLE protocol is not publicly documented.
 
@@ -32,7 +32,7 @@ Do not commit `.env` files, generated runtime metadata, credentials, API keys, o
 3. Lock the screen for at least 30 seconds, then expand the persistent **Recording** notification to verify its elapsed time advances.
 4. Tap the **Stop** action in that notification.
 5. Unlock FlowType. The recording should be finalized, transcribed, and saved to History. If notification permission was denied, recording still continues, but Android cannot show the lock-screen Stop action until notifications are enabled for FlowType in system settings.
-6. To validate recovery, temporarily disconnect the network after stopping a short recording. FlowType must show **Retry transcription** and keep the completed audio safe; retrying after reconnecting must process that same recording instead of starting a new one.
+6. To validate recovery, temporarily disconnect the network after stopping a short recording. FlowType must keep the completed audio safe, without disabling the main Dictate button. Open the **Vault** tab and use **Retry transcription** to process that exact recording after reconnecting.
 
 ## Android inbound-share test
 
@@ -41,8 +41,18 @@ Do not commit `.env` files, generated runtime metadata, credentials, API keys, o
 3. FlowType should open on **Dictate**, read the shared file, and begin the normal transcription and formatting flow.
 4. The resulting session should be visible in History and use the same stored audio file for Session Detail playback.
 
+## Recovery Vault and long-upload test
+
+1. Record or import an audio file larger than 18 MB (roughly 75 minutes at the app's speech capture settings).
+2. After stopping, confirm it appears in **Vault** while FlowType uploads it.
+3. Interrupt Wi-Fi or close the app during the upload. Do **not** delete the Vault item.
+4. Reopen FlowType, return to **Vault**, and tap **Resume Upload**. The card reports the saved chunk count and resumes from the first missing chunk.
+5. Once transcription succeeds, the completed transcript is moved to History and the protected local copy is automatically removed.
+
+Current guardrails: imports and reconstructed multi-part uploads are limited to **180 MB** (up to 64 chunks). Recovery Vault retains at most 20 protected audio files; only an explicit delete/clear action removes them.
+
 ## Recommended next milestones
 
-The most useful next implementation is a physical-device test using an AIREC-exported WAV file through both picker and Android Share. After that, add cloud export (Notion, Slack, or Google Docs), server-side chunked uploads for multi-hour recordings, and only then investigate direct Bluetooth transfer with the physical recorder available for protocol inspection.
+The most useful next implementation is a physical-device test using an AIREC-exported WAV file through both picker and Android Share. After that, add cloud export (Notion, Slack, or Google Docs), background resumption of chunk transfers where OS policies allow, and only then investigate direct Bluetooth transfer with the physical recorder available for protocol inspection.
 
 See [HANDOFF.md](./HANDOFF.md) for continuation instructions and known limitations.

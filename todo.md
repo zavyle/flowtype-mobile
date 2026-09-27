@@ -51,3 +51,15 @@
 
 - [ ] Push sanitized FlowType source to `zavyle/Voice-Notes` branch `flowtype-handoff` without modifying `main`
 - [ ] Verify the branch URL, latest commit, and handoff documentation on GitHub
+
+
+# Recovery Vault & Resumable Upload Milestone
+
+- [x] Replace the single pending-recording slot with a multi-item Recovery Vault that never blocks the Dictate button
+- [x] Protect both native live recordings and imported recorder audio before transcription
+- [x] Add 6 MB checkpointed resumable uploads for recordings larger than 18 MB
+- [x] Add server-side chunk storage, byte-order verification, and reconstruction before Whisper transcription
+- [x] Add a dedicated Vault tab with resume, retry, and explicit destructive-delete controls
+- [x] Raise native import support to 180 MB without expanding recordings into base64 memory
+- [x] Add regression tests and complete an end-to-end local M4A split/upload/reassembly smoke test
+- [x] Bump Android release to FlowType v1.0.2 / versionCode 5 with a descriptive APK naming plan

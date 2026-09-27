@@ -2,7 +2,7 @@
 
 ## Current baseline
 
-The latest stable product checkpoint includes AIREC-compatible audio-file import, Android screen-off recording, and durable recovery for completed native recordings. The app is called FlowType and is a mobile Expo project with an Express/tRPC server. Native recordings are speech-optimized AAC files that FlowType copies into its Documents recovery folder before transcription. The app uploads that file through `/api/voice/transcribe-upload` as binary audio instead of a base64 tRPC JSON mutation, then formats and saves a real `TranscriptionSession`. If the upload or transcription fails, the original file remains locally recoverable and **Retry transcription** resends the same audio. Native Android recording uses Expo Audio's microphone foreground service: it stays active while the screen is locked and exposes a persistent system notification with an elapsed timer and native **Stop** action.
+The latest stable product checkpoint includes AIREC-compatible audio-file import, Android screen-off recording, a dedicated **Recovery Vault**, and resumable long-file uploads. The app is called FlowType and is a mobile Expo project with an Express/tRPC server. Native recordings and imported audio are copied into the Documents-backed Recovery Vault before transcription. Files smaller than 18 MB use the proven binary `/api/voice/transcribe-upload` route. Larger files are split into 6 MB chunks and each returned storage key is checkpointed in AsyncStorage. `/api/voice/resumable-uploads/:uploadId/complete` reconstructs those ordered bytes, then calls the normal transcription pipeline. If the upload or transcription fails, the original local file and chunk checkpoint remain recoverable; the **Vault** tab resumes from the first missing chunk. Completed sessions are moved to History and only then is their protected audio deleted. Native Android recording uses Expo Audio's microphone foreground service: it stays active while the screen is locked and exposes a persistent system notification with a native **Stop** action.
 
 The current UI is intentionally honest about the integration boundary: users are told to transfer a file from AIREC to their phone and then import it. The app does not claim direct Bluetooth control or direct inbound Android share handling. This is because the public AIREC information confirms Bluetooth file transfer in the vendor app but does not expose the recorder’s BLE service UUIDs, characteristics, command protocol, SDK, or third-party API.
 
@@ -10,12 +10,16 @@ The current UI is intentionally honest about the integration boundary: users are
 
 | File | Responsibility |
 |---|---|
-| `app/(tabs)/index.tsx` | Main Dictate UI, recording states, import action, transcription handoff, session creation |
+| `app/(tabs)/index.tsx` | Main Dictate UI, recording states, import action, transcription handoff; primary Dictate button is intentionally independent of Recovery Vault |
+| `app/(tabs)/recovery.tsx` | Dedicated Recovery Vault list, resume/retry and explicit deletion controls |
 | `hooks/use-audio-engine.ts` | Native/web recording, microphone permissions, recorder lifecycle, metering, retry details |
 | `lib/backgroundRecording.ts` | Testable policy for foreground recording mode and notification Stop handling |
-| `lib/audioImport.ts` | Document picker, audio MIME inference, size validation, base64 conversion |
-| `lib/pendingRecording.ts` | Protected Documents-folder copy and AsyncStorage metadata for failed-recording recovery |
-| `lib/nativeAudioUpload.ts` | Binary Android file uploader and JSON-safe server-response validation |
+| `lib/audioImport.ts` | Document picker, audio MIME inference, 180 MB size validation, native no-base64 import path |
+| `lib/pendingRecording.ts` | Multi-item protected Documents-folder Recovery Vault and AsyncStorage metadata |
+| `lib/resumableUpload.ts` | Pure checkpoint, chunk-range, and progress helpers for multi-part uploads |
+| `lib/nativeAudioUpload.ts` | Direct or resumable Android file uploader and JSON-safe server-response validation |
+| `server/resumableUpload.ts` | Server-side upload ID, chunk-key, and byte-assembly guards |
+| `server/_core/index.ts` | `/api/voice/resumable-uploads` chunk-store and completion routes |
 | `lib/sessionStore.ts` | AsyncStorage session model and persistence; demo sessions are filtered out |
 | `server/voiceService.ts` | Upload to managed storage, Whisper transcription, AI formatting, response mapping |
 | `server/routers.ts` | tRPC voice procedures: transcription, reformatting, long-session consolidation |
@@ -28,11 +32,13 @@ The current UI is intentionally honest about the integration boundary: users are
 
 First, install dependencies and run `pnpm check`, `pnpm lint`, and `pnpm test`. Then test the app on a physical Android device with a real AIREC-exported WAV file. Confirm that the file picker opens, the import enters a processing state, the server returns transcription, and History contains the imported session. Also start a live recording, lock the screen for at least 30 seconds, then use **Stop** in the persistent Android notification; on return to FlowType, confirm that the audio is transcribed and saved. Notification permission is required for the visible lock-screen Stop action on Android 13+.
 
+For scalability testing, use an audio file over 18 MB. Interrupt the transfer after at least one chunk finishes, reopen the app, and resume it from **Vault**. Confirm the progress starts from the saved `uploadedChunks` count—not 0—and that the main **Tap to Dictate** action remains available throughout. The server caps reconstructed recordings at 180 MB / 64 chunks as a memory safety guard. The local server chunk route has been smoke-tested end-to-end with a real M4A split into two storage-backed parts and reassembled successfully.
+
 After physical-device validation, add an audio playback control to Session Detail for `session.audioUrl` and `chunk.audioUrl`. Next, implement Android share-target intake through a native config plugin or a compatible Expo module; do not describe `expo-sharing` alone as inbound share support because it only shares outward from the app. Finally, investigate direct BLE transfer with the physical recorder present and use a BLE inspection tool to discover services and characteristics. Treat any undocumented protocol as device-specific and avoid destructive firmware or pairing operations.
 
 ## Known limitations
 
-The imported-audio picker still has a 35 MB request-oriented safety limit because it uses the legacy JSON/base64 mutation. Native live recordings bypass that limit through binary upload and recovery. The next scaling step is to route imported AIREC files through the same binary endpoint and add server-side chunks for very long multi-hour sessions. Direct AIREC Bluetooth integration is unverified. The web preview can demonstrate the picker UI, but microphone and native file behavior must be confirmed on a physical device.
+Long recordings have a tested resumable transfer path but the **complete** server request reconstructs the original binary in server memory before giving it to Whisper. The 180 MB cap keeps this bounded; true streaming transcoding would be a later scaling step beyond that cap. Direct AIREC Bluetooth integration is unverified. The web preview can demonstrate the picker UI, but microphone, Android Storage Access Framework URIs, and recovery uploads must be confirmed on a physical device.
 
 ## Configuration and secrets
 
@@ -40,4 +46,4 @@ Use the project’s managed environment/secrets mechanism for runtime credential
 
 ## Definition of done for the next agent
 
-A good next checkpoint should include a real-device import test, playback of the imported recording from Session Detail, regression tests for empty files and oversized files, and a documented decision about whether Android inbound share handling is worth the native configuration effort before BLE reverse-engineering begins.
+A good next checkpoint should include a real-device interrupted-upload/resume test, playback of the imported recording from Session Detail, regression tests for empty and over-limit files, and a documented decision about whether Android inbound share handling is worth the native configuration effort before BLE reverse-engineering begins.
