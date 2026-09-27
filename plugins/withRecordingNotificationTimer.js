@@ -64,6 +64,26 @@ function patchAudioRecordingServiceSource(source) {
     '      .setContentText("Recording · ${formatElapsedRecordingTime()}")',
   );
 
+  if (patched.includes('.setCategory(NotificationCompat.CATEGORY_SERVICE)')) {
+    patched = replaceOnce(
+      patched,
+      '      .setCategory(NotificationCompat.CATEGORY_SERVICE)',
+      [
+        '      .setCategory(NotificationCompat.CATEGORY_SERVICE)',
+        '      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)',
+        '      .setPriority(NotificationCompat.PRIORITY_HIGH)',
+      ].join("\n"),
+    );
+  }
+
+  if (patched.includes('NotificationManager.IMPORTANCE_LOW')) {
+    patched = replaceOnce(
+      patched,
+      '          NotificationManager.IMPORTANCE_LOW',
+      '          NotificationManager.IMPORTANCE_HIGH',
+    );
+  }
+
   patched = replaceOnce(
     patched,
     "  private fun startForegroundWithNotification() {\n    val notification = buildNotification()",
@@ -133,6 +153,20 @@ function patchAudioRecordingServiceSource(source) {
 
 const withRecordingNotificationTimer = (config) => {
   return withDangerousMod(config, ["android", async (modConfig) => {
+    const projectRoot = path.join(modConfig.modRequest.platformProjectRoot, "..");
+    const moduleConfigPath = path.join(projectRoot, "node_modules", "expo-audio", "expo-module.config.json");
+    if (fs.existsSync(moduleConfigPath)) {
+      try {
+        const moduleConfig = JSON.parse(fs.readFileSync(moduleConfigPath, "utf8"));
+        if (moduleConfig.android?.publication) {
+          delete moduleConfig.android.publication;
+          fs.writeFileSync(moduleConfigPath, JSON.stringify(moduleConfig, null, 2));
+        }
+      } catch (e) {
+        console.warn("Could not adjust expo-audio publication config:", e);
+      }
+    }
+
     const servicePath = path.join(modConfig.modRequest.platformProjectRoot, "..", ...SERVICE_PATH);
     if (!fs.existsSync(servicePath)) {
       throw new Error("FlowType could not locate Expo Audio's Android recording service during prebuild.");

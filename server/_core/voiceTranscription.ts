@@ -229,13 +229,19 @@ export async function transcribeAudio(
     // Step 5: Parse and return the transcription result
     const whisperResponse = (await response.json()) as WhisperResponse;
 
-    // Validate response structure
-    if (!whisperResponse.text || typeof whisperResponse.text !== "string") {
+    // Validate response structure. Whisper returns text: "" (and sometimes
+    // language: null) when no speech was detected in the audio file.
+    // That is a normal transcription outcome, not an API format error.
+    if (typeof whisperResponse.text !== "string") {
       return {
         error: "Invalid transcription response",
         code: "SERVICE_ERROR",
         details: "Transcription service returned an invalid response format",
       };
+    }
+
+    if (!whisperResponse.language || typeof whisperResponse.language !== "string") {
+      whisperResponse.language = options.language || "en";
     }
 
     return whisperResponse; // Return native Whisper API response directly

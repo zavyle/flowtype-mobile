@@ -379,10 +379,6 @@ export default function DictationHomeScreen() {
   }, [isRecording, keepScreenAwake]);
 
   const handleToggleRecord = async () => {
-    if (!isRecording && pendingRecording) {
-      setLastError("A completed recording is saved safely on this device. Retry its transcription before starting a new dictation.");
-      return;
-    }
     if (isRecording) {
       try {
         const recorded = await stopRecording();
@@ -693,6 +689,40 @@ export default function DictationHomeScreen() {
           </View>
         )}
 
+        {/* Separate Recovery Card for saved recording so primary Dictate button remains untouched */}
+        {pendingRecording && !isRecording && !isProcessing && (
+          <View style={styles.recoveryCard}>
+            <View style={styles.recoveryCardHeader}>
+              <IconSymbol name="waveform" size={18} color="#818CF8" />
+              <Text style={styles.recoveryCardTitle}>Saved Recording Available</Text>
+            </View>
+            <Text style={styles.recoveryCardDescription}>
+              FlowType preserved your completed {formatTimeClock(pendingRecording.duration)} recording on this device.
+            </Text>
+            <View style={styles.recoveryCardActions}>
+              <TouchableOpacity
+                style={styles.recoveryRetryBtn}
+                onPress={() => void retryPendingTranscription()}
+                activeOpacity={0.8}
+              >
+                <IconSymbol name="arrow.clockwise" size={14} color="#FFFFFF" />
+                <Text style={styles.recoveryRetryText}>Retry Transcription</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.recoveryDiscardBtn}
+                onPress={async () => {
+                  await clearPendingRecording(pendingRecording.id);
+                  setPendingRecording(null);
+                  setLastError(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.recoveryDiscardText}>Dismiss</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Result Transcript Card */}
         {currentSession ? (
           <View style={styles.resultCard}>
@@ -789,7 +819,7 @@ export default function DictationHomeScreen() {
             (isProcessing || isStarting) && styles.primaryDictateBtnProcessing,
           ]}
           onPress={handleToggleRecord}
-          disabled={isProcessing || isStarting || (!isRecording && Boolean(pendingRecording))}
+          disabled={isProcessing || isStarting}
           activeOpacity={0.85}
         >
           {isProcessing || isStarting ? (
@@ -808,8 +838,6 @@ export default function DictationHomeScreen() {
               ? "Tap to Complete Dictation"
               : isProcessing
               ? "Processing Voice..."
-              : pendingRecording
-              ? "Saved Recording Ready to Retry"
               : "Tap to Dictate"}
           </Text>
         </TouchableOpacity>
@@ -1079,6 +1107,59 @@ const styles = StyleSheet.create({
     color: "#FCA5A5",
     fontSize: 12,
     fontWeight: "700",
+  },
+  recoveryCard: {
+    backgroundColor: "#1E2235",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(99, 102, 241, 0.4)",
+    padding: 14,
+    marginBottom: 16,
+    gap: 8,
+  },
+  recoveryCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  recoveryCardTitle: {
+    color: "#E2E8F0",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  recoveryCardDescription: {
+    color: "#94A3B8",
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  recoveryCardActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 4,
+  },
+  recoveryRetryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#4F46E5",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  recoveryRetryText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  recoveryDiscardBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  recoveryDiscardText: {
+    color: "#64748B",
+    fontSize: 12,
+    fontWeight: "600",
   },
   resultCard: {
     backgroundColor: "#181B26",
