@@ -6,7 +6,7 @@ FlowType is an Expo SDK 54 mobile voice-dictation workspace inspired by Wispr Fl
 
 The current stable build includes native and web microphone permission handling, real `expo-audio` recording, animated waveform feedback, retryable recording/transcription errors, **Android foreground-service recording that survives a screen lock with a live elapsed notification timer and Stop action**, extended-session settings, Keep Awake during active recording, custom vocabulary, six formatting styles, searchable History, session details with audio playback, and recorder-file import for WAV, MP3, and M4A files. On Android, every finished dictation or imported recorder file is copied into **Recovery Vault** before transcription. Smaller files retain the proven binary-upload path; larger files upload in durable 6 MB chunks, with a checkpoint after each successful chunk. A network loss or app restart can therefore resume at the first missing chunk instead of deleting or retransmitting the whole recording.
 
-The recorder-import path is designed for AIREC-compatible hardware workflows. Transfer the recorder’s exported file to the phone, then either open FlowType and tap **Import Recorder Audio** or choose **Share → FlowType** from Android’s Files app. Direct Bluetooth control is not implemented because the recorder’s proprietary BLE protocol is not publicly documented.
+The recorder-import path is designed for AIREC-compatible hardware workflows. Transfer the recorder’s exported file to the phone, then either open FlowType and tap **Import Recorder Audio** or choose **Share → FlowType** from Android’s Files app. The installed mobile app now also has **Connect AIREC**, which requests Bluetooth permission, scans nearby devices, connects to the selected recorder, and reads its exposed GATT profile without writing any commands. The vendor app uses BLE to discover/pair, then switches to a proprietary Wi-Fi/TCP file-transfer channel; FlowType intentionally leaves file transfer read-only until that device-specific handshake is confirmed on the physical recorder.
 
 ## Tech stack
 
@@ -40,6 +40,14 @@ Do not commit `.env` files, generated runtime metadata, credentials, API keys, o
 2. Tap **Share** and select **FlowType**.
 3. FlowType should open on **Dictate**, read the shared file, and begin the normal transcription and formatting flow.
 4. The resulting session should be visible in History and use the same stored audio file for Session Detail playback.
+
+## AIREC Bluetooth connection test
+
+1. Install a freshly built APK; BLE requires a native build and is not available in Expo Go or the web preview.
+2. Turn on the recorder and place it in **App Recording / connection mode** (its blue indicator should stay on).
+3. In FlowType Dictate, tap **Connect AIREC** → **Find nearby recorders**, then grant Nearby Devices/Bluetooth permission.
+4. Select the recorder. A successful connection displays its service and characteristic count and does not send any write command to the device.
+5. Tap **Share diagnostic** and provide the text together with the recorder model if FlowType needs to add the next, device-specific Wi-Fi transfer step.
 
 ## Recovery Vault and long-upload test
 

@@ -44,7 +44,7 @@ const env = {
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.0.2",
+  version: "1.0.3",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
@@ -68,7 +68,7 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    versionCode: 5,
+    versionCode: 6,
     permissions: [
       "POST_NOTIFICATIONS",
       "RECORD_AUDIO",
@@ -102,6 +102,16 @@ const config: ExpoConfig = {
         microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
         recordAudioAndroid: true,
         enableBackgroundRecording: true,
+      },
+    ],
+    [
+      "react-native-ble-plx",
+      {
+        // Discovery and transfer happen while the Devices screen is open. Do
+        // not require BLE hardware or background scanning for all users.
+        isBackgroundEnabled: false,
+        neverForLocation: false,
+        bluetoothAlwaysPermission: "Allow $(PRODUCT_NAME) to find and connect to your AIREC recorder.",
       },
     ],
     "./plugins/withRecordingNotificationTimer",

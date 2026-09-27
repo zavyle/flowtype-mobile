@@ -494,8 +494,17 @@ export default function DictationHomeScreen() {
               {isImporting ? "Importing Recording..." : "Import Recorder Audio"}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.importPill, styles.connectRecorderPill]}
+            onPress={() => router.push("/devices" as never)}
+            disabled={isRecording || isStarting}
+            activeOpacity={0.8}
+          >
+            <IconSymbol name="waveform" size={14} color="#A5B4FC" />
+            <Text style={styles.importPillText}>Connect AIREC</Text>
+          </TouchableOpacity>
           <Text style={styles.importHint}>
-            AIREC: transfer the WAV file to your phone, then choose Share → FlowType — or import it here.
+            Connect your AIREC recorder to inspect it safely, or import/share a WAV file directly to FlowType.
           </Text>
         </View>
 
@@ -836,6 +845,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  connectRecorderPill: {
+    borderColor: "rgba(165, 180, 252, 0.7)",
+    backgroundColor: "rgba(99, 102, 241, 0.12)",
   },
   importPillText: {
     color: "#818CF8",
