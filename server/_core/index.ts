@@ -7,6 +7,26 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { processAudioTranscriptionBuffer, type FormattingStyle } from "../voiceService";
+
+const FORMATTING_STYLES = new Set<FormattingStyle>([
+  "clean_voice",
+  "raw_verbatim",
+  "executive_summary",
+  "bullet_points",
+  "email_draft",
+  "meeting_minutes",
+]);
+
+function parseVocabulary(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -61,6 +81,42 @@ async function startServer() {
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, timestamp: Date.now() });
   });
+
+  // Native recordings are uploaded as binary rather than a JSON/base64 tRPC
+  // payload. This keeps multi-hour voice notes under the gateway limit and
+  // allows Android's file uploader to keep working after the screen locks.
+  app.post(
+    "/api/voice/transcribe-upload",
+    express.raw({ type: ["audio/*", "application/octet-stream"], limit: "64mb" }),
+    async (req, res) => {
+      const mimeType = req.headers["content-type"]?.split(";", 1)[0] || "audio/m4a";
+      const language = typeof req.query.language === "string" ? req.query.language : "auto";
+      const requestedStyle = typeof req.query.style === "string" ? req.query.style : "clean_voice";
+      const style = FORMATTING_STYLES.has(requestedStyle as FormattingStyle)
+        ? (requestedStyle as FormattingStyle)
+        : "clean_voice";
+
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        res.status(400).json({ error: { code: "EMPTY_AUDIO", message: "No audio data was uploaded." } });
+        return;
+      }
+
+      try {
+        const result = await processAudioTranscriptionBuffer({
+          audioBuffer: req.body,
+          mimeType,
+          language,
+          style,
+          customVocabulary: parseVocabulary(req.query.vocabulary),
+        });
+        res.json(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Voice transcription failed.";
+        console.error("[NativeAudioUpload] transcription failed:", error);
+        res.status(502).json({ error: { code: "TRANSCRIPTION_FAILED", message } });
+      }
+    },
+  );
 
   app.use(
     "/api/trpc",

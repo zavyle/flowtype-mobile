@@ -4,7 +4,7 @@ FlowType is an Expo SDK 54 mobile voice-dictation workspace inspired by Wispr Fl
 
 ## Current capabilities
 
-The current stable build includes native and web microphone permission handling, real `expo-audio` recording, animated waveform feedback, retryable recording/transcription errors, **Android foreground-service recording that survives a screen lock with a live elapsed notification timer and Stop action**, extended-session settings, Keep Awake during active recording, custom vocabulary, six formatting styles, searchable History, session details with audio playback, and recorder-file import for WAV, MP3, and M4A files. Imported recordings are sent through the existing transcription and formatting pipeline and saved as real sessions with chunk and audio metadata.
+The current stable build includes native and web microphone permission handling, real `expo-audio` recording, animated waveform feedback, retryable recording/transcription errors, **Android foreground-service recording that survives a screen lock with a live elapsed notification timer and Stop action**, extended-session settings, Keep Awake during active recording, custom vocabulary, six formatting styles, searchable History, session details with audio playback, and recorder-file import for WAV, MP3, and M4A files. On Android, a finished dictation is first copied to protected local recovery storage and uploaded as binary audio rather than an expanded base64 JSON payload; a failed transcription therefore leaves the exact recording intact and turns **Retry transcription** into a real resend.
 
 The recorder-import path is designed for AIREC-compatible hardware workflows. Transfer the recorder’s exported file to the phone, then either open FlowType and tap **Import Recorder Audio** or choose **Share → FlowType** from Android’s Files app. Direct Bluetooth control is not implemented because the recorder’s proprietary BLE protocol is not publicly documented.
 
@@ -32,6 +32,7 @@ Do not commit `.env` files, generated runtime metadata, credentials, API keys, o
 3. Lock the screen for at least 30 seconds, then expand the persistent **Recording** notification to verify its elapsed time advances.
 4. Tap the **Stop** action in that notification.
 5. Unlock FlowType. The recording should be finalized, transcribed, and saved to History. If notification permission was denied, recording still continues, but Android cannot show the lock-screen Stop action until notifications are enabled for FlowType in system settings.
+6. To validate recovery, temporarily disconnect the network after stopping a short recording. FlowType must show **Retry transcription** and keep the completed audio safe; retrying after reconnecting must process that same recording instead of starting a new one.
 
 ## Android inbound-share test
 

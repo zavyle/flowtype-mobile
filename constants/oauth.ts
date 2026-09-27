@@ -33,6 +33,13 @@ export const DEFAULT_PRODUCTION_API_BASE_URL = "https://flowtypeapp-jlgbkqu9.man
  * URL pattern: https://PORT-sandboxid.region.domain
  */
 export function getApiBaseUrl(): string {
+  // A standalone build can outlive its temporary sandbox preview. Always use
+  // the published backend on a real phone so fetch never receives a preview
+  // HTML page in place of a tRPC JSON response.
+  if (ReactNative.Platform.OS !== "web") {
+    return DEFAULT_PRODUCTION_API_BASE_URL;
+  }
+
   // If API_BASE_URL is set, use it
   if (API_BASE_URL) {
     return API_BASE_URL.replace(/\/$/, "");
@@ -55,8 +62,7 @@ export function getApiBaseUrl(): string {
     return "";
   }
 
-  // On native (Android/iOS standalone or Expo Go), relative URLs crash fetch with "Invalid URL".
-  // Always return the reachable backend domain.
+  // Fallback when a web host cannot be derived.
   return DEFAULT_PRODUCTION_API_BASE_URL;
 }
 

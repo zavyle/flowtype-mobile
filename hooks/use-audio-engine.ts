@@ -17,6 +17,32 @@ import {
   shouldHandleBackgroundStop,
 } from "@/lib/backgroundRecording";
 
+// Speech transcription does not need the 44.1kHz stereo music preset.
+// At 32kbps mono AAC, a 90-minute voice note is roughly 22 MB rather than
+// ~86 MB, leaving room for upload and server processing without base64 bloat.
+const SPEECH_RECORDING_OPTIONS = {
+  ...RecordingPresets.HIGH_QUALITY,
+  sampleRate: 16000,
+  numberOfChannels: 1,
+  bitRate: 32000,
+  android: {
+    ...RecordingPresets.HIGH_QUALITY.android,
+    extension: ".m4a",
+    outputFormat: "mpeg4" as const,
+    audioEncoder: "aac" as const,
+    sampleRate: 16000,
+  },
+  ios: {
+    ...RecordingPresets.HIGH_QUALITY.ios,
+    extension: ".m4a",
+    sampleRate: 16000,
+  },
+  web: {
+    ...RecordingPresets.HIGH_QUALITY.web,
+    bitsPerSecond: 32000,
+  },
+};
+
 export interface AudioEngineState {
   isRecording: boolean;
   isPaused: boolean;
@@ -30,7 +56,8 @@ export function useAudioEngine(options?: {
   chunkIntervalMinutes?: number;
   onChunkReady?: (chunkBlob: Blob | string, chunkIndex: number) => void;
   onBackgroundStop?: (recording: {
-    base64: string;
+    base64: string | null;
+    uri?: string;
     duration: number;
     mimeType: string;
   }) => Promise<void> | void;
@@ -65,11 +92,6 @@ export function useAudioEngine(options?: {
     setAudioLevel(0.08);
 
     try {
-      const base64 = await FileSystem.readAsStringAsync(status.url, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      if (!base64) throw new Error("The background recording was empty.");
-
       const duration = Math.max(
         1,
         Math.floor((Date.now() - (recordingStartedAtRef.current ?? Date.now())) / 1000),
@@ -77,7 +99,8 @@ export function useAudioEngine(options?: {
       );
       durationRef.current = duration;
       await onBackgroundStopRef.current?.({
-        base64: `data:audio/m4a;base64,${base64}`,
+        base64: null,
+        uri: status.url,
         duration,
         mimeType: "audio/m4a",
       });
@@ -90,7 +113,7 @@ export function useAudioEngine(options?: {
     }
   }, []);
   const nativeRecorder = useAudioRecorder({
-    ...RecordingPresets.HIGH_QUALITY,
+    ...SPEECH_RECORDING_OPTIONS,
     isMeteringEnabled: true,
   }, handleNativeRecordingStatus);
   const nativeRecorderState = useAudioRecorderState(nativeRecorder, 250);
@@ -342,6 +365,7 @@ export function useAudioEngine(options?: {
 
   const stopRecording = useCallback(async (): Promise<{
     base64: string | null;
+    uri?: string;
     duration: number;
     mimeType: string;
   }> => {
@@ -357,6 +381,9 @@ export function useAudioEngine(options?: {
 
     if (Platform.OS !== "web") {
       try {
+        // The native status callback also fires after stop(). Mark this as an
+        // in-app stop so it does not transcribe the same file twice.
+        stoppingFromInAppButtonRef.current = true;
         await nativeRecorder.stop();
         const uri = nativeRecorder.uri;
         setIsRecording(false);
@@ -364,13 +391,10 @@ export function useAudioEngine(options?: {
         if (!uri) {
           throw new Error("The microphone stopped without producing an audio file.");
         }
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (!base64) throw new Error("The microphone produced an empty audio file.");
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
         return {
-          base64: `data:audio/m4a;base64,${base64}`,
+          base64: null,
+          uri,
           duration: finalDuration,
           mimeType: "audio/m4a",
         };

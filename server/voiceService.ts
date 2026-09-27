@@ -166,9 +166,53 @@ export async function processAudioTranscription(params: {
     customVocabulary = [],
   } = params;
 
-  // Convert base64 to buffer
+  // Convert base64 to buffer before using the binary pipeline. Native clients
+  // use processAudioTranscriptionBuffer directly to avoid base64 expansion.
   const cleanBase64 = audioBase64.replace(/^data:[^;]+;base64,/, "");
   const audioBuffer = Buffer.from(cleanBase64, "base64");
+
+  return processAudioTranscriptionBuffer({
+    audioBuffer,
+    mimeType,
+    language,
+    prompt,
+    style,
+    customVocabulary,
+  });
+}
+
+/**
+ * Transcribes an already-uploaded binary recording. Keeping the file binary
+ * from Android avoids the 33% base64 overhead that made long dictations hit
+ * request limits before Whisper could receive them.
+ */
+export async function processAudioTranscriptionBuffer(params: {
+  audioBuffer: Buffer;
+  mimeType?: string;
+  language?: string;
+  prompt?: string;
+  style?: FormattingStyle;
+  customVocabulary?: string[];
+}): Promise<{
+  rawText: string;
+  formattedText: string;
+  language: string;
+  duration: number;
+  audioUrl: string;
+  segments: Array<{
+    start: number;
+    end: number;
+    text: string;
+  }>;
+}> {
+  const {
+    audioBuffer,
+    mimeType = "audio/webm",
+    language = "en",
+    prompt,
+    style = "clean_voice",
+    customVocabulary = [],
+  } = params;
 
   // 1. Save audio to persistent storage via storagePut
   const ext = mimeType.includes("wav")

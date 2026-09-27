@@ -36,13 +36,15 @@ const env = {
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
   androidPackage: bundleId,
-  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL || "https://flowtypeapp-jlgbkqu9.manus.space",
+  // Standalone builds must never embed a short-lived sandbox API hostname.
+  // The published domain routes both the app and its transcription API.
+  apiBaseUrl: "https://flowtypeapp-jlgbkqu9.manus.space",
 };
 
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.0.0",
+  version: "1.0.1",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
@@ -66,6 +68,7 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
+    versionCode: 2,
     permissions: [
       "POST_NOTIFICATIONS",
       "RECORD_AUDIO",

@@ -2,7 +2,7 @@
 
 ## Current baseline
 
-The latest stable product checkpoint includes AIREC-compatible audio-file import and Android screen-off recording. The app is called FlowType and is a mobile Expo project with an Express/tRPC server. The import flow supports WAV, MP3, and M4A files, validates the selected file and rejects imports above 35 MB, converts the file to base64, calls `voice.transcribeAudioChunk`, formats the transcription using the selected style, and saves a real `TranscriptionSession` with one completed `AudioChunk`. Native Android recording uses Expo Audio's microphone foreground service: it stays active while the screen is locked and exposes a persistent system notification with a native **Stop** action.
+The latest stable product checkpoint includes AIREC-compatible audio-file import, Android screen-off recording, and durable recovery for completed native recordings. The app is called FlowType and is a mobile Expo project with an Express/tRPC server. Native recordings are speech-optimized AAC files that FlowType copies into its Documents recovery folder before transcription. The app uploads that file through `/api/voice/transcribe-upload` as binary audio instead of a base64 tRPC JSON mutation, then formats and saves a real `TranscriptionSession`. If the upload or transcription fails, the original file remains locally recoverable and **Retry transcription** resends the same audio. Native Android recording uses Expo Audio's microphone foreground service: it stays active while the screen is locked and exposes a persistent system notification with an elapsed timer and native **Stop** action.
 
 The current UI is intentionally honest about the integration boundary: users are told to transfer a file from AIREC to their phone and then import it. The app does not claim direct Bluetooth control or direct inbound Android share handling. This is because the public AIREC information confirms Bluetooth file transfer in the vendor app but does not expose the recorder’s BLE service UUIDs, characteristics, command protocol, SDK, or third-party API.
 
@@ -14,6 +14,8 @@ The current UI is intentionally honest about the integration boundary: users are
 | `hooks/use-audio-engine.ts` | Native/web recording, microphone permissions, recorder lifecycle, metering, retry details |
 | `lib/backgroundRecording.ts` | Testable policy for foreground recording mode and notification Stop handling |
 | `lib/audioImport.ts` | Document picker, audio MIME inference, size validation, base64 conversion |
+| `lib/pendingRecording.ts` | Protected Documents-folder copy and AsyncStorage metadata for failed-recording recovery |
+| `lib/nativeAudioUpload.ts` | Binary Android file uploader and JSON-safe server-response validation |
 | `lib/sessionStore.ts` | AsyncStorage session model and persistence; demo sessions are filtered out |
 | `server/voiceService.ts` | Upload to managed storage, Whisper transcription, AI formatting, response mapping |
 | `server/routers.ts` | tRPC voice procedures: transcription, reformatting, long-session consolidation |
@@ -30,7 +32,7 @@ After physical-device validation, add an audio playback control to Session Detai
 
 ## Known limitations
 
-The current imported-audio path has a 35 MB request-oriented safety limit because the existing tRPC JSON body limit is 50 MB and base64 expands the payload. Longer recordings should eventually use multipart upload or server-side chunked transfer rather than sending one large JSON mutation. Direct AIREC Bluetooth integration is unverified. The existing session detail UI stores audio URLs but may still need dedicated playback controls for imported recordings. The web preview can demonstrate the picker UI, but microphone and native file behavior must be confirmed on a physical device.
+The imported-audio picker still has a 35 MB request-oriented safety limit because it uses the legacy JSON/base64 mutation. Native live recordings bypass that limit through binary upload and recovery. The next scaling step is to route imported AIREC files through the same binary endpoint and add server-side chunks for very long multi-hour sessions. Direct AIREC Bluetooth integration is unverified. The web preview can demonstrate the picker UI, but microphone and native file behavior must be confirmed on a physical device.
 
 ## Configuration and secrets
 
