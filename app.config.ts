@@ -68,7 +68,7 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    versionCode: 3,
+    versionCode: 4,
     permissions: [
       "POST_NOTIFICATIONS",
       "RECORD_AUDIO",
